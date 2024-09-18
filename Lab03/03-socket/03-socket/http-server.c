@@ -143,7 +143,7 @@ void* handle_http_request(void* arg){
 
     int request_len = recv(request, recv_buff, 2000, 0);
     if (request_len < 0){
-        printf("HTTP receive failed");
+        fprintf(stderr, "HTTP receive failed");
         exit(1);
     }
 
@@ -168,7 +168,7 @@ void* handle_http_request(void* arg){
         if (relative_url){
             pos = strstr(recv_buff, "Host:");
             if (!pos){
-                printf("HTTP host not found");
+                fprintf(stderr, "HTTP Host not found");
                 exit(1);
             }
             pos += 6;
@@ -193,7 +193,7 @@ void* handle_http_request(void* arg){
         strcat(send_buff, "\r\n\r\n\r\n\r\n");
 
         if (send(request, send_buff, strlen(send_buff), 0) < 0){
-            printf("HTTP send failed");
+            fprintf(stderr, "HTTP send failed");
             exit(1);
         }
 
@@ -212,7 +212,7 @@ void* handle_https_request(void* arg){
     pthread_detach(pthread_self());
     SSL *ssl = (SSL*)arg;
     if (SSL_accept(ssl) == -1){
-        printf("HTTPS SSL_accept fialed");
+        fprintf(stderr, "HTTPS SSL_accept failed");
         exit(1);
     }
 
@@ -224,7 +224,7 @@ void* handle_https_request(void* arg){
         memset(recv_buff, 0, 2000);
         int request_len = SSL_read(ssl, recv_buff, 2000);
         if (request_len < 0){
-            printf("HTTPS SSL_read failed");
+            fprintf(stderr, "HTTPS receive failed");
             exit(1);
         }
         if (recv_buff[0] == '\0')
