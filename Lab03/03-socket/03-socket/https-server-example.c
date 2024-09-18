@@ -7,6 +7,7 @@
 #include <sys/types.h>
 #include <netinet/in.h>
 #include <resolv.h>
+#include <pthread.h>
 #include "openssl/ssl.h"
 #include "openssl/err.h"
 
