@@ -11,6 +11,10 @@
 #include <openssl/ssl.h>
 #include <openssl/err.h>
 
+void* http_server(void* arg);
+void* https_server(void* arg);
+void* handle_http_request(void* arg);
+void* handle_https_request(void* arg);
 int main(){
     pthread_t http, https;
     if (pthread_create(&http, NULL, http_server, NULL) != 0){
@@ -29,9 +33,9 @@ int main(){
 void* http_server(void* arg){
     int port = 80;
     int sock;
-    if (sock = socket(AF_INET, SOCK_STREAM, 0) < 0){
+    if ((sock = socket(AF_INET, SOCK_STREAM, 0)) < 0){
         perror("HTTP socket creation failed");
-        return -1;
+        exit(1);
     }
     
     struct sockaddr_in addr;
@@ -39,9 +43,9 @@ void* http_server(void* arg){
     addr.sin_addr.s_addr = INADDR_ANY;
     addr.sin_port = htons(port);
 
-    if (bind(sock, (struct sockaddr*)&addr, sizeof(addr) < 0)){
+    if (bind(sock, (struct sockaddr*)&addr, sizeof(addr)) < 0){
         perror("HTTP bind failed");
-        return -1;
+        exit(1);
     }
     listen(sock, 128);
     
@@ -52,13 +56,13 @@ void* http_server(void* arg){
         int request = accept(sock, (struct sockaddr*)&caddr, &addrlen);
         if (request < 0){
             perror("HTTP accept failed");
-            return -1;
+            exit(1);
         }
 
         pthread_t http_new_thread;
         if (pthread_create(&http_new_thread, NULL, (void*)handle_http_request, (void*)&request) != 0){
             perror("HTTP handle thread creation failed");
-            return -1;
+            exit(1);
         }
     }
 
@@ -78,17 +82,17 @@ void* https_server(void* arg){
     // load certificate and private key
     if (SSL_CTX_use_certificate_file(ctx, "./keys/cnlab.cert", SSL_FILETYPE_PEM) <= 0){
         perror("load cert failed");
-        return -1;
+        exit(1);
     }
     if (SSL_CTX_use_PrivateKey_file(ctx, "./keys/cnlab.prikey", SSL_FILETYPE_PEM) <= 0){
-        perror("load prikey failed")
-        return -1;
+        perror("load prikey failed");
+        exit(1);
     }
 
     int sock;
     if (sock = socket(AF_INET, SOCK_STREAM, 0) < 0){
         perror("HTTPS socket creation failed");
-        return -1;
+        exit(1);
     }
     
     struct sockaddr_in addr;
@@ -98,7 +102,7 @@ void* https_server(void* arg){
 
     if (bind(sock, (struct sockaddr*)&addr, sizeof(addr) < 0)){
         perror("HTTPS bind failed");
-        return -1;
+        exit(1);
     }
     listen(sock, 10);
     
@@ -109,7 +113,7 @@ void* https_server(void* arg){
         int request = accept(sock, (struct sockaddr*)&caddr, &addrlen);
         if (request < 0){
             perror("HTTPS accept failed");
-            return -1;
+            exit(1);
         }
 
         SSL *ssl = SSL_new(ctx);
@@ -119,7 +123,7 @@ void* https_server(void* arg){
         pthread_t https_new_thread;
         if (pthread_create(&https_new_thread, NULL, (void*)handle_https_request, (void*)&ssl) != 0){
             perror("HTTPS handle thread creation failed");
-            return -1;
+            exit(1);
         }
     }
 
@@ -140,7 +144,7 @@ void* handle_http_request(void* arg){
     int request_len = recv(request, recv_buff, 2000, 0);
     if (request_len < 0){
         printf("HTTP receive failed");
-        return -1;
+        exit(1);
     }
 
     char *get = strstr(recv_buff, "GET");
@@ -151,12 +155,13 @@ void* handle_http_request(void* arg){
         char *host = (char*)malloc(100 * sizeof(char));
         int relative_url = *pos == '/';
 
-        for (int i = 0; *pos != ' '; pos++, i++)
+        int i = 0;
+        for (i = 0; *pos != ' '; pos++, i++)
             url[i] = *pos;
-        url[i] = "\0";
+        url[i] = '\0';
         pos++;
 
-        for (int i = 0; *pos != '\r'; pos++, i++)
+        for (i = 0; *pos != '\r'; pos++, i++)
             http_version[i] = *pos;
         http_version[i] = '\0';
 
@@ -164,7 +169,7 @@ void* handle_http_request(void* arg){
             pos = strstr(recv_buff, "Host:");
             if (!pos){
                 printf("HTTP host not found");
-                return -1;
+                exit(1);
             }
             pos += 6;
 
@@ -189,7 +194,7 @@ void* handle_http_request(void* arg){
 
         if (send(request, send_buff, strlen(send_buff), 0) < 0){
             printf("HTTP send failed");
-            return -1;
+            exit(1);
         }
 
         free(url);
@@ -206,9 +211,9 @@ void* handle_http_request(void* arg){
 void* handle_https_request(void* arg){
     pthread_detach(pthread_self());
     SSL *ssl = (SSL*)arg;
-    if (SSL_accept(ssl == -1)){
+    if (SSL_accept(ssl) == -1){
         printf("HTTPS SSL_accept fialed");
-        return -1;
+        exit(1);
     }
 
     char* recv_buff = (char*)malloc(2000 * sizeof(char));
@@ -220,7 +225,7 @@ void* handle_https_request(void* arg){
         int request_len = SSL_read(ssl, recv_buff, 2000);
         if (request_len < 0){
             printf("HTTPS SSL_read failed");
-            return -1;
+            exit(1);
         }
         if (recv_buff[0] == '\0')
             break;
@@ -232,16 +237,17 @@ void* handle_https_request(void* arg){
 
         if (get){
             char *pos = get + 4;
-            int relative_url = *iterator == '/'; 
+            int relative_url = *pos == '/'; 
             int range = 0;
             int range_begin, range_end;
 
-            for (int i = 0; *pos != ' '; pos++, i++)
+            int i = 0;
+            for (i = 0; *pos != ' '; pos++, i++)
                 url[i] = *pos;
             url[i] = '\0';
             pos++;
 
-            for (int i = 0; *pos != '\r'; pos++, i++)
+            for (i = 0; *pos != '\r'; pos++, i++)
                 http_version[i] = *pos;
             http_version[i] = '\0';
 
@@ -269,7 +275,7 @@ void* handle_https_request(void* arg){
 
             if (pos = strstr(recv_buff, "Connection:")){
                 pos += 12;
-                if (*pos = "k")
+                if (*pos == 'k')
                     keep_alive = 1;
                 else
                     keep_alive = 0;
