@@ -90,7 +90,7 @@ void* https_server(void* arg){
     }
 
     int sock;
-    if (sock = socket(AF_INET, SOCK_STREAM, 0) < 0){
+    if ((sock = socket(AF_INET, SOCK_STREAM, 0)) < 0){
         perror("HTTPS socket creation failed");
         exit(1);
     }
