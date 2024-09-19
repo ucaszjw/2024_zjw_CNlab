@@ -338,64 +338,65 @@
 在\texttt{main}函数中创建两个线程，分别监听80和443端口：
 
 \begin{lstlisting}[language=c]
-    int main(){
-        pthread_t http, https;
-        if (pthread_create(&http, NULL, http_server, NULL) != 0){
-            perror("HTTP thread creation failed");
-            return -1;
-        }
-        if (pthread_create(&https, NULL, http_server, NULL) != 0){
-            perror("HTTPS thread creation failed");
-            return -1;
-        }
-        pthread_join(http, NULL);
-        pthread_join(https, NULL);
-        return 0;
+int main(){   
+    pthread_t http, https;
+    if (pthread_create(&http, NULL, HTTP_SERVER, NULL) != 0){
+        perror("Thread creation failed");
+        return -1;
     }
+    if (pthread_create(&https, NULL, HTTPS_SERVER, NULL) != 0){
+        perror("Thread creation failed");
+        return -1;
+    }
+    pthread_join(http, NULL);
+    pthread_join(https, NULL);
+    return 0;
+}
 \end{lstlisting}
 
-在\texttt{http\_server}函数中，创建socket并绑定到对应端口，然后监听请求。我是用一个循环来不断接收请求，再使用多线程同时处理请求，根据请求内容返回对应的应答：
+在\texttt{HTTP\_SERVER}函数中，创建socket并绑定到对应端口，然后监听请求。我是用一个循环来不断接收请求，再使用多线程同时处理请求，根据请求内容返回对应的应答：
 
 \begin{lstlisting}[language=c]
-    void* http_server(void* arg){
-        int port = 80;
-        int sock;
-        if ((sock = socket(AF_INET, SOCK_STREAM, 0)) < 0){
-            perror("HTTP socket creation failed");
-            exit(1);
-        }
-        
-        struct sockaddr_in addr;
-        addr.sin_family = AF_INET;
-        addr.sin_addr.s_addr = INADDR_ANY;
-        addr.sin_port = htons(port);
-    
-        if (bind(sock, (struct sockaddr*)&addr, sizeof(addr)) < 0){
-            perror("HTTP bind failed");
-            exit(1);
-        }
-        listen(sock, 128);
-        
-        while (1)
-        {
-            struct sockaddr_in caddr;
-            socklen_t addrlen;
-            int request = accept(sock, (struct sockaddr*)&caddr, &addrlen);
-            if (request < 0){
-                perror("HTTP accept failed");
-                exit(1);
-            }
-    
-            pthread_t http_new_thread;
-            if (pthread_create(&http_new_thread, NULL, (void*)handle_http_request, (void*)&request) != 0){
-                perror("HTTP handle thread creation failed");
-                exit(1);
-            }
-        }
-    
-        close(sock);
-        return NULL;
+void *HTTP_SERVER(void *arg){   
+    int port = 80;
+
+    int sockfd;
+    if ((sockfd = socket(AF_INET, SOCK_STREAM, 0)) < 0){
+        perror("Create socket failed");
+        exit(1);
     }
+
+    struct sockaddr_in addr;
+    addr.sin_family = AF_INET;
+    addr.sin_addr.s_addr = INADDR_ANY;
+    addr.sin_port = htons(port);
+
+    if (bind(sockfd, (struct sockaddr *)&addr, sizeof(addr)) < 0){
+        perror("bind failed");
+        exit(1);
+    }
+    listen(sockfd, 128);
+
+    while (1){
+        struct sockaddr_in c_addr;
+        socklen_t addr_len;
+
+        int request = accept(sockfd, (struct sockaddr *)&c_addr, &addr_len);
+        if (request < 0){
+            perror("Accept failed");
+            exit(1);
+        }
+
+        pthread_t new_thread;
+        if ((pthread_create(&new_thread, NULL, (void *)handle_http_request, (void *)&request)) != 0){
+            perror("Create handle_http_request thread failed");
+            exit(1);
+        }
+    }
+
+    close(sockfd);
+    return NULL;
+}
 \end{lstlisting}
 
 上面这段代码中，\texttt{socket}函数用于创建socket，sockaddr_in结构体用于存储地址信息，\texttt{bind}函数用于将socket绑定到端口，\texttt{listen}函数用于监听请求，\texttt{accept}函数用于接收请求，\texttt{pthread\_create}函数用于创建每一个请求的处理线程，\texttt{close}函数用于关闭socket。
@@ -404,93 +405,96 @@
 在每一个请求的处理线程中，首先接收到请求报文，然后解析请求报文，根据请求内容返回对应的应答：
 
 \begin{lstlisting}[language=c]
-    void* handle_http_request(void* arg){
-        pthread_detach(pthread_self());
-        int request = *(int*)arg;
-    
-        char* recv_buff = (char*)malloc(2000 * sizeof(char));
-        char* send_buff = (char*)malloc(6000 * sizeof(char));
-        memset(recv_buff, 0, 2000);
-        memset(send_buff, 0, 6000);
-    
-        int request_len = recv(request, recv_buff, 2000, 0);
-        if (request_len < 0){
-            fprintf(stderr, "HTTP receive failed");
-            exit(1);
-        }
-    
-        char *get = strstr(recv_buff, "GET");
-        if (get){
-            char *pos = get + 4; // skip "GET "
-            char *url = (char*)malloc(50 * sizeof(char));
-            char *http_version = (char*)malloc(9 * sizeof(char));
-            char *host = (char*)malloc(100 * sizeof(char));
-            int relative_url = *pos == '/'; // relative url has a leading '/'
-    
-            int i = 0;
-            for (i = 0; *pos != ' '; pos++, i++)
-                url[i] = *pos;
-            url[i] = '\0';
-            pos++;
-    
-            for (i = 0; *pos != '\r'; pos++, i++)
-                http_version[i] = *pos;
-            http_version[i] = '\0';
-    
-            if (relative_url){
-                pos = strstr(recv_buff, "Host:"); // find Host field
-                if (!pos){
-                    fprintf(stderr, "HTTP Host not found");
-                    exit(1);
-                }
-                pos += 6; // skip "Host: "
-    
-                for (int i = 0; *pos != '\r'; pos++, i++)
-                    host[i] = *pos;
-                host[i] = '\0';
-            }
-    
-    
-            strcat(send_buff, host);
-            strcat(send_buff, http_version);
-            strcat(send_buff, " 301 Moved Permanently\r\nLocation");
-            strcat(send_buff, "https://");
-    
-            if (relative_url){
-                strcat(send_buff, host);
-                strcat(send_buff, url);
-            }
-            else
-                strcat(send_buff, &url[7]); // skip "http://"
-            strcat(send_buff, "\r\n\r\n\r\n\r\n"); // end of response
-    
-            if (send(request, send_buff, strlen(send_buff), 0) < 0){
-                fprintf(stderr, "HTTP send failed");
+void *handle_http_request(void *arg){  
+    pthread_detach(pthread_self());
+
+    int request = *(int *)arg;
+
+    char *recv_buff = (char *)malloc(2000 * sizeof(char));
+    memset(recv_buff, 0, 2000);
+    char *send_buff = (char *)malloc(6000 * sizeof(char));
+
+    int request_len;
+    request_len = recv(request, recv_buff, 2000, 0);
+    if (request_len < 0){
+        fprintf(stderr, "recv failed\n");
+        exit(1);
+    }
+
+    char *get = strstr(recv_buff, "GET");
+    if (get){
+        char *pos;
+        pos = get + 4; // skip "GET "
+
+        char *url = (char *)malloc(50 * sizeof(char));
+        char *http_version = (char *)malloc(9 * sizeof(char));
+        char *host = (char *)malloc(100 * sizeof(char));
+        int relative_url;
+
+        relative_url = ((*pos) == '/');
+
+        int i;
+        for (i = 0; (*pos) != ' '; pos++, i++)
+            url[i] = *pos;
+        url[i] = '\0';
+        pos++;
+        for (i = 0; (*pos) != '\r'; pos++, i++)
+            http_version[i] = *pos;
+        http_version[i] = '\0';
+        
+        if (relative_url){
+            pos = strstr(recv_buff, "Host:");
+            if(!pos){
+                perror("Not found Host");
                 exit(1);
             }
-    
-            free(url);
-            free(http_version);
-            free(host);
+            pos += 6;
+
+            for (int i = 0; (*pos) != '\r'; pos++, i++)
+                host[i] = *pos;
+            host[i] = '\0';
         }
-        free(send_buff);
-        free(recv_buff);
-    
-        close(request);
-        return NULL;
+
+        memset(send_buff, 0, 6000);
+        strcat(send_buff, http_version);
+        strcat(send_buff, " 301 Moved Permanently\r\nLocation: ");
+        strcat(send_buff, "https://");
+
+        if (relative_url){
+            strcat(send_buff, host);
+            strcat(send_buff, url);
+        }
+        else
+            strcat(send_buff, &url[7]); // skip "http://"
+        strcat(send_buff, "\r\n\r\n\r\n\r\n");
+
+        if ((send(request, send_buff, strlen(send_buff), 0)) < 0){
+            fprintf(stderr, "send failed");
+            exit(1);
+        }
+
+        free(url);
+        free(http_version);
+        free(host);
     }
+    free(send_buff);
+    free(recv_buff);
+
+    close(request);
+    return NULL;
+}
 \end{lstlisting} 
 
 上面这段代码中，我先使用\texttt{pthread\_detach}函数将线程设置为分离状态，然后使用\texttt{recv}函数接收请求报文，存入缓冲区中，再使用\texttt{strstr}函数找到请求报文中的GET方法。这里我区分了绝对URL和相对URL，对于绝对URL，直接返回301状态码和路径，对于相对URL，需要找到Host字段，再返回301状态码，拼接之后得到绝对路径。最后使用\texttt{send}函数发送应答报文，关闭socket。
 
-\texttt{https\_server}函数与\texttt{http\_server}较为类似，区别在于它使用Open SSL库进行加密通信，需要先加载证书和私钥：
+\texttt{HTTPS\_SERVER}函数与\texttt{HTTP\_SERVER}较为类似，区别在于它使用OpenSSL库进行加密通信，需要先加载证书和私钥：
 
 \begin{lstlisting}[language=c]
     SSL_library_init();
     OpenSSL_add_all_algorithms();
     SSL_load_error_strings();
 
-    const SSL_METHOD *method = TLS_server_method();
+    const SSL_METHOD *method = TLSv1_2_server_method();
     SSL_CTX *ctx = SSL_CTX_new(method);
 
     // load certificate and private key
@@ -507,42 +511,43 @@
 之后的步骤就大体一致了，建立socket，绑定端口，监听请求，使用循环不断接收请求，为每一个请求创建一个处理线程，处理请求，返回应答。下面给出部分代码，省略了一些重复的部分：
 
 \begin{lstlisting}[language=c]
-    while (1)
-    {
-        struct sockaddr_in caddr;
-        socklen_t addrlen;
-        int request = accept(sock, (struct sockaddr*)&caddr, &addrlen);
+    while (1){
+        struct sockaddr_in c_addr;
+        socklen_t addr_len;
+
+        int request = accept(sockfd, (struct sockaddr *)&c_addr, &addr_len);
         if (request < 0){
-            perror("HTTPS accept failed");
+            perror("Accept failed");
             exit(1);
         }
 
         SSL *ssl = SSL_new(ctx);
         SSL_set_fd(ssl, request);
 
+        pthread_t new_thread;
 
-        pthread_t https_new_thread;
-        if (pthread_create(&https_new_thread, NULL, (void*)handle_https_request, (void*)&ssl) != 0){
-            perror("HTTPS handle thread creation failed");
+        if ((pthread_create(&new_thread, NULL, (void *)handle_https_request, (void *)ssl)) != 0){
+            perror("Create handle_http_request thread failed");
             exit(1);
         }
     }
 \end{lstlisting}
 
-不同之处在于，这里需要创建SSL结构体，将socket绑定到SSL结构体，然后传入处理线程中。处理线程中，需要使用SSL结构体的函数来接收和发送数据：
+不同之处在于，这里处理请求过程中需要创建SSL结构体，将socket绑定到SSL结构体，然后传入处理线程中。处理线程中，需要使用SSL结构体的函数来接收和发送数据：
 
 \begin{lstlisting}[language=c]
-    void* handle_https_request(void* arg){
-        pthread_detach(pthread_self());
-        SSL *ssl = (SSL*)arg;
-        if (SSL_accept(ssl) == -1){
-            fprintf(stderr, "HTTPS SSL_accept failed");
-            exit(1);
-        }
-    
-        char* recv_buff = (char*)malloc(2000 * sizeof(char));
-        char* send_buff = (char*)malloc(6000 * sizeof(char));
-        int keep_alive = 1;
+void *handle_https_request(void *arg){   
+    pthread_detach(pthread_self());
+
+    SSL *ssl = (SSL *)arg;
+    if (SSL_accept(ssl) == -1){
+        perror("SSL_accept failed");
+        exit(1);
+    }
+
+    char *recv_buff = (char *)malloc(2000 * sizeof(char));
+    char *send_buff = (char *)malloc(6000 * sizeof(char));
+    int keep_alive = 1;
 \end{lstlisting}
 
 上面代码中，我使用\texttt{SSL\_accept}函数接收请求，建立缓冲区，设置\texttt{keep\_alive}变量，用于判断是否保持连接。
@@ -550,152 +555,180 @@
 我仍然区分了绝对URL和相对URL，在https的处理函数中，我先判断是否有Range字段和保持连接信息，在确定要发送的文件路径。如果文件不存在，返回404状态码，若存在且有Range字段，返回206状态码，若存在但无Range字段，返回200状态码，最后发送应答报文：
 
 \begin{lstlisting}[language=c]
-        while (keep_alive){
-            memset(recv_buff, 0, 2000);
-            int request_len = SSL_read(ssl, recv_buff, 2000);
-            if (request_len < 0){
-                fprintf(stderr, "HTTPS receive failed");
-                exit(1);
-            }
-            if (recv_buff[0] == '\0')
-                break;
-    
-            char *url = (char*)malloc(50 * sizeof(char));
-            char *http_version = (char*)malloc(9 * sizeof(char));
-            char *path = (char*)malloc(100 * sizeof(char));
-            char *get = strstr(recv_buff, "GET");
-    
-            if (get){
-                char *pos = get + 4;
-                int relative_url = *pos == '/';
-                int range = 0;
-                int range_begin, range_end;
-    
-                int i = 0;
-                for (i = 0; *pos != ' '; pos++, i++)
-                    url[i] = *pos;
-                url[i] = '\0';
-                pos++;
-    
-                for (i = 0; *pos != '\r'; pos++, i++)
-                    http_version[i] = *pos;
-                http_version[i] = '\0';
-    
-                if (pos = strstr(recv_buff, "Range:")){
-                    pos += 13; // skip "Range: bytes="
-                    range = 1;
-                    range_begin = 0;
-    
-                    while(*pos >= '0' && *pos <= '9'){
-                        range_begin = range_begin * 10 + *pos - '0';
-                        pos++;
-                    }
-                    pos++;
-    
-                    if (*pos < '0' || *pos > '9')
-                        range_end = -1; // -1 means to the end of file
-                    else{
-                        range_end = 0;
-                        while(*pos >= '0' && *pos <= '9'){
-                            range_end = range_end * 10 + *pos - '0';
-                            pos++;
-                        }
-                    }
-                }
-    
-                if (pos = strstr(recv_buff, "Connection:")){
-                    pos += 12;
-                    if (*pos == 'k') // keep-alive, otherwise close
-                        keep_alive = 1;
-                    else
-                        keep_alive = 0;
-                }
-    
-                path[0] = '.';
-                path[1] = '\0';
-                if (relative_url)
-                    strcat(path, url);
-                else{
-                    int count = 3;
-                    for (int i = 0; count > 0; i++){
-                        if (url[i] == '/')
-                            count--;
-                    }
-                    strcat(path, &url[i]);
-                }
-    
-    
-                FILE *fp = fopen(path, "r");
-                if (!fp){
-                    memset(send_buff, 0, 6000);
-                    strcat(send_buff, http_version);
-                    strcat(send_buff, " 404 Not Found\r\n\r\n\r\n\r\n");
-                    SSL_write(ssl, send_buff, strlen(send_buff));
-                    break;
-                }
-                else{
-                    char header[200] = {0};
-                    strcat(header, http_version);
-                    if (range)
-                        strcat(header, " 206 Partial Content\r\n");
-                    else
-                        strcat(header, " 200 OK\r\n");
-    
-                    int file_size, file_begin;
-                    if (range){
-                        if(range_end == -1){
-                            fseek(fp, 0L, SEEK_END); // move to the end of file
-                            file_size = ftell(fp) - range_begin + 1; // calculate the size of file
-                            file_begin = range_begin;
-                        }
-                        else{
-                            file_size = range_end - range_begin + 1;
-                            file_begin = range_begin;
-                        }
-                    }
-                    else{
-                        fseek(fp, 0L, SEEK_END);
-                        file_size = ftell(fp);
-                        file_begin = 0;
-                    }
-    
-                    strcat(header, "Content-Length: ");
-                    fseek(fp, file_begin, 0);
-                    char file_size_str[64] = {0};
-                    sprintf(file_size_str, "%d", file_size); // convert file size to string
-    
-                    char *response = (char*)malloc((file_size + 200) * sizeof(char));
-                    memset(response, 0, file_size + 200);
-                    strcat(response, header);
-                    strcat(response, file_size_str);
-    
-                    strcat(response, "\r\nConnection: ");
-                    if (keep_alive)
-                        strcat(response, "keep-alive");
-                    else
-                        strcat(response, "close");
-                    
-                    strcat(response, "\r\n\r\n");
-                    fread(response + strlen(response), 1, file_size, fp);
-                    SSL_write(ssl, response, strlen(response));
-    
-                    fclose(fp);
-                    if(range == 1 && range_end == -1)
-                        break;
-                }
-            }
-            free(url);
-            free(http_version);
-            free(path);
+    while (keep_alive){
+        memset(recv_buff, 0, 2000);
+        int request_len = SSL_read(ssl, recv_buff, 2000);
+        if (request_len < 0){
+            fprintf(stderr, "SSL_read failed\n");
+            exit(1);
         }
-        free(recv_buff);
-        free(send_buff);
-    
-        SSL_free(ssl);
-        close(SSL_get_fd(ssl));
-        return NULL;
+        if(recv_buff[0] == '\0')
+            break;
+
+        char *url = (char *)malloc(50 * sizeof(char));
+        char *http_version = (char *)malloc(9 * sizeof(char));
+        char *file_path = (char *)malloc(100 * sizeof(char));
+        char *get = strstr(recv_buff, "GET");
+
+        if (get){
+            char *pos;
+            pos = get + 4; // skip "GET "
+
+            int relative_url;
+            int range = 0;
+            int range_begin, range_end;
+
+            relative_url = (*(pos) == '/');
+
+            int i;
+            for (i = 0; *pos != ' '; pos++, i++)
+                url[i] = *pos;
+            url[i] = '\0';
+            pos++;
+
+            for (i = 0; *pos != '\r'; pos++, i++)
+                http_version[i] = *pos;
+            http_version[i] = '\0';
+\end{lstlisting}
+
+我使用\texttt{SSL\_read}函数接收请求报文。同样，我先检查了是否有GET。
+
+\begin{lstlisting}[language=c]
+            if(pos = (strstr(recv_buff, "Range:"))){
+                pos += 13; // skip "Range: bytes="
+                range = 1;
+                range_begin = 0;
+                while(*pos >= '0' && *pos <= '9'){
+                    range_begin = range_begin * 10 + (*pos) - '0';
+                    pos++;
+                }
+                pos++;
+
+                if(*pos < '0' || *pos > '9')
+					range_end = -1;
+                else{
+					range_end = 0;
+					while(*pos >= '0' && *pos <= '9'){
+						range_end = range_end * 10 + (*pos)-'0';
+						pos++;
+					}
+				}
+            }
+
+            if(pos = (strstr(recv_buff, "Connection:"))){
+                pos += 12; // skip "Connection: "
+                if(*pos == 'k')
+                    keep_alive = 1;
+                else if(*pos == 'c')
+                    keep_alive = 0;
+            }
+\end{lstlisting}
+
+我使用\texttt{strstr}函数找到Range字段和Connection字段，根据字段内容设置相应的变量，使得程序能够正确返回应答。
+
+\begin{lstlisting}[language=c]
+            file_path[0] = '.';
+            file_path[1] = '\0';
+            if(relative_url)
+                strcat(file_path, url);
+            else{
+                i = 0;
+                int count = 3;
+                while(count){
+                    if(url[i] == '/')
+                        count--;
+                    i++;
+                }
+                strcat(file_path, url + i);
+            }
+
+
+            FILE *fp = fopen(file_path, "r");
+            if(fp == NULL){   
+                memset(send_buff, 0, 6000);
+				strcat(send_buff, http_version);
+				strcat(send_buff, " 404 Not Found\r\n\r\n\r\n\r\n");
+				SSL_write(ssl, send_buff, strlen(send_buff));
+				break;
+            }
+            else{
+                char header[200] = {0};
+				strcat(header,http_version);
+
+				if(range)
+					strcat(header, " 206 Partial Content\r\n");
+				else
+					strcat(header, " 200 OK\r\n");
+                    
+				int size,begin;
+				if(range){
+					if(range_end==-1){
+						fseek(fp,0L,SEEK_END);
+						size = ftell(fp) - range_begin + 1;
+						begin = range_begin;
+					}
+                    else{
+						size = range_end - range_begin + 1;
+						begin = range_begin;
+					}
+				}
+                else{
+					fseek(fp,0L,SEEK_END);
+					size = ftell(fp);
+					begin = 0;
+				}
+
+				strcat(header, "Content-Length: ");
+				fseek(fp,begin,0);
+            
+				char str_size[64] = {0};	
+                sprintf(str_size, "%d", size);
+
+				char response[size + 200];
+				memset(response,0, size + 200);
+				strcat(response, header);
+				strcat(response, str_size);
+
+				strcat(response,"\r\nConnection: ");
+				if(keep_alive)
+					strcat(response, "keep-alive");
+				else
+					strcat(response, "close");
+
+				strcat(response, "\r\n\r\n");
+				fread(&(response[strlen(response)]), 1, size, fp);
+				SSL_write(ssl,response,strlen(response));
+
+				fclose(fp);
+
+				if(range==1 && range_end==-1)
+					break;
+            }
+        }
+        free(url);
+        free(http_version);
+        free(file_path);
     }
 \end{lstlisting}
 
+最后，我根据请求内容，返回对应的应答报文。根据文件的路径是否为相对路径，我拼接出文件的绝对路径，若文件不存在，返回404状态码，若存在，根据Range字段和Connection字段，返回对应的状态码和内容。最后关闭文件，释放内存。
 
+\section{实验结果}
+
+我在h1上运行HTTP服务器程序，同时监听80和443端口，然后在h2上运行测试程序，验证程序正确性：
+
+\begin{figure}[H]
+    \centering
+    \subfigure{\includegraphics[width=0.35\textwidth]{result1.png}}
+    \subfigure{\includegraphics[width=0.35\textwidth]{result2.png}}
+    \subfigure{\includegraphics[width=0.35\textwidth]{result3.png}}
+    \subfigure{\includegraphics[width=0.35\textwidth]{result4.png}}
+    \caption{测试程序结果}
+\end{figure}
+
+测试程序运行正常，没有出现AssertionError或其他错误，说明程序实现正确。
+
+\section{实验总结}
+
+本次实验实现了一个简单的HTTP服务器，支持GET方法，解析请求报文，返回相应应答及内容。通过实验，我学会了使用socket编程，实现HTTP服务器，了解了HTTP协议的基本内容，加深了对网络编程的理解。我在本次实验中所学到的知识也基本都是之前从未了解到的，对我来说是一次很好的学习机会。
 \end{document}
