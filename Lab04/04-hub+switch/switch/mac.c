@@ -50,6 +50,8 @@ iface_info_t *lookup_port(u8 mac[ETH_ALEN])
 			return entry->iface;
 		}
 	}
+
+	pthread_mutex_unlock(&mac_port_map.lock);
 	return NULL;
 }
 
@@ -113,7 +115,7 @@ int sweep_aged_mac_port_entry()
 	
 	for (int i = 0; i < HASH_8BITS; i++) {
 		list_for_each_entry_safe(entry, q, &mac_port_map.hash_table[i], list) {
-			if (now - entry->visited > MAC_PORT_TIMEOUT) {
+			if ((int)(now - entry->visited) > MAC_PORT_TIMEOUT) {
 				list_delete_entry(&entry->list);
 				free(entry);
 				n++;
