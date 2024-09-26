@@ -42,6 +42,7 @@
 \usepackage{diagbox} % 表格斜线
 \usepackage{listings} % 插入代码
 \usepackage{verbatim} % 多行注释
+\usepackage{ifplatform} % 检测编译平台
 \usetikzlibrary{shapes.geometric, arrows} % 引入流程图需要的库
 \usetikzlibrary{automata} % 引入automata库
 \usetikzlibrary{shapes,arrows,positioning,chains} % 引入positioning库
@@ -295,12 +296,24 @@
 \tikzstyle{decision} = [diamond, minimum width=3cm, minimum height=1cm, text centered, draw=black, fill=green!30]
 \tikzstyle{arrow} = [thick,->,>=stealth]
 
-\setmainfont{Times New Roman}
-\setsansfont{Times New Roman}
-\setmonofont{Consolas}
-\setCJKmainfont{SimHei}
-\setCJKsansfont{SimSun}
-\setCJKmonofont{FangSong}
+\ifwindows
+    \setmainfont{Times New Roman}
+    \setsansfont{Times New Roman}
+    \setmonofont{Consolas}
+    \setCJKmainfont{SimHei}
+    \setCJKsansfont{SimSun}
+    \setCJKmonofont{FangSong}
+\fi
+
+\ifmacosx
+    \setmainfont{Times New Roman}
+    \setsansfont{Times New Roman}
+    \setmonofont{Menlo}
+    \setCJKmainfont{STHeiti}
+    \setCJKsansfont{STSong}
+    \setCJKmonofont{STFangsong}
+\fi
+
 \punctstyle{kaiming}
 
 \begin{document}
