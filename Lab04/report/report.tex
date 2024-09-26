@@ -396,7 +396,7 @@ h1, h2, h3分别是三个节点，它们如果能够相互ping通，说明广播
     \caption{h1向h3测量}
 \end{figure}
 
-可以看出，h1向h2测量和h1向h3测量的实际速率差异较大，而且都远未达到理论带宽值。这是因为h1发出的数据都会广播至h2和h3，实际来看，h1发送给h2的数据会占据b1到h3的带宽，而h1发送给h3的数据也会占据b1到h2的带宽，所以实际速率必定达不到理论带宽值。而对于实际速率的差异，我的解释是，因为我们在xterm终端中并不能保证两个iperf进程同时启动，所以会造成TCP窗口大小的差异，从而导致实际速率的差异。
+可以看出，h1向h2测量和h1向h3测量的实际速率差异较大，而且都远未达到理论带宽值。这是因为h1发出的数据都会广播至h2和h3，实际来看，h1发送给h2的数据会占据b1到h3的带宽，而h1发送给h3的数据也会占据b1到h2的带宽，所以实际速率必定达不到理论带宽值。而对于实际速率的差异，我的解释是，因为我们在xterm终端中并不能保证两个iperf进程同时启动，所以会造成TCP窗口大小的差异，从而导致实际速率的差异。可以预测出的是，在接下来的h2向h1测量和h3向h1测量中，因为路径不是竞争关系，所以速率应该会更接近理论带宽值。事实果然如此：
 
 \begin{figure}[H]
     \centering
@@ -409,4 +409,245 @@ h1, h2, h3分别是三个节点，它们如果能够相互ping通，说明广播
     \includegraphics[width=0.7\textwidth]{h3toh1.png}
     \caption{h3向h1测量}
 \end{figure}
+
+\subsection{构建环形拓扑，验证数据包环路}
+
+拓扑图如下：
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.35\textwidth]{topo2.png}
+    \caption{环形拓扑图}
+\end{figure}
+
+此时需要更改\texttt{three\_nodes\_bw.py}文件，重新配置拓扑：
+
+\begin{lstlisting}[language=Python]
+    class BroadcastTopo(Topo):
+    def build(self):
+        h1 = self.addHost('h1')
+        h2 = self.addHost('h2')
+        b1 = self.addHost('b1')
+        b2 = self.addHost('b2')
+        b3 = self.addHost('b3')
+
+        self.addLink(h1, b1, bw=10)
+        self.addLink(h2, b2, bw=10)
+        self.addLink(b1, b2, bw=10)
+        self.addLink(b2, b3, bw=10)
+        self.addLink(b3, b1, bw=10)
+\end{lstlisting}
+
+使用h1向h2广播ping消息，经wireshark抓包，可以看到数据包在环路中不断传递：
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.8\textwidth]{ring.png}
+    \caption{数据包环路}
+\end{figure}
+
+可以看到，h1一直收到来自h2的相同消息，这说明数据包在环路中不断被广播，根本在于拓扑网络出现了环路，使得数据包不断被循环转发。
+
+\section{实验总结}
+
+本次实验主要是关于广播网络的实验，我实现了节点广播的函数，验证了广播网络的正常运行和效率，以及验证了环形拓扑下数据包环路的现象。实验过程中，我对广播网络的工作原理有了更深入的了解，广播网络会占据更多的网络资源，效率低下。我也对环形拓扑下数据包环路的现象有了直观的认识，这是广播网络的一个关键弱点，一旦出现环路，数据包会不断被循环转发，直到网络崩溃。于是，为了避免这种情况以及提高效率，新的转发机制亟待设计，这就是马上就要进行实验的交换机网络。
+
+\newpage
+\setcounter{section}{0}
+\begin{center}
+    \Large \bf 第二部分 \quad Switch
+\end{center}
+
+\section{实验内容}
+
+\begin{enumerate}
+    \item 实现对数据结构\texttt{mac_port_map}的所有操作，以及数据包的转发和广播操作
+    
+    \begin{lstlisting}[language=C]
+        iface_info_t *lookup_port(u8 mac[ETH_ALEN]);
+        void insert_mac_port(u8 mac[ETH_ALEN], iface_info_t *iface);
+        int sweep_aged_mac_port_entry();
+        void broadcast_packet(iface_info_t *iface, const char *packet, int len);
+        void handle_packet(iface_info_t *iface, char *packet, int len);
+    \end{lstlisting}
+
+    \item 使用iperf和给定的拓扑进行实验，对比交换机转发与集线器广播的性能
+\end{enumerate}
+
+\section{实验过程}
+
+\subsection{实现转发表的查询操作}
+
+\begin{lstlisting}[language=C]
+    // lookup the mac address in mac_port table
+    iface_info_t *lookup_port(u8 mac[ETH_ALEN])
+    {
+        // TODO: implement the lookup process here
+        // fprintf(stdout, "TODO: implement the lookup process here.\n");
+        int hash = (int)hash8((char *)mac, ETH_ALEN);
+        mac_port_entry_t *entry;
+        pthread_mutex_lock(&mac_port_map.lock);
+    
+        list_for_each_entry(entry, &mac_port_map.hash_table[hash], list) {
+            if (memcmp(entry->mac, mac, ETH_ALEN) == 0) {
+                pthread_mutex_unlock(&mac_port_map.lock);
+                return entry->iface;
+            }
+        }
+    
+        pthread_mutex_unlock(&mac_port_map.lock);
+        return NULL;
+    }
+\end{lstlisting}
+
+在这个函数里，我们首先计算出mac地址的哈希值，然后遍历哈希表，如果找到了对应的mac地址，就返回对应的接口信息，否则返回\texttt{NULL}。函数中需要线程互斥锁是因为多个线程可能同时访问转发表（比如之后的老化操作）。
+
+\subsection{实现转发表的插入操作}
+
+\begin{lstlisting}[language=C]
+    // insert the mac -> iface mapping into mac_port table
+    void insert_mac_port(u8 mac[ETH_ALEN], iface_info_t *iface)
+    {
+        // TODO: implement the insertion process here
+        // fprintf(stdout, "TODO: implement the insertion process here.\n");
+        int hash = (int)hash8((char *)mac, ETH_ALEN);
+        mac_port_entry_t *entry;
+        pthread_mutex_lock(&mac_port_map.lock);
+    
+        list_for_each_entry(entry, &mac_port_map.hash_table[hash], list) {
+            if (memcmp(entry->mac, mac, ETH_ALEN) == 0) {
+                entry->iface = iface;
+                entry->visited = time(NULL);
+                pthread_mutex_unlock(&mac_port_map.lock);
+                return;
+            }
+        }
+    
+        mac_port_entry_t *nentry = (mac_port_entry_t *)malloc(sizeof(mac_port_entry_t));
+        nentry->iface = iface;
+        nentry->visited = time(NULL);
+        for (int i = 0; i < ETH_ALEN; i++)
+            nentry->mac[i] = mac[i];
+        list_add_head(&nentry->list, &mac_port_map.hash_table[hash]);
+    
+        pthread_mutex_unlock(&mac_port_map.lock);
+        return;
+    }
+\end{lstlisting}
+
+仍然计算出mac地址的哈希值，然后遍历哈希表，如果找到了对应的mac地址，就更新对应的接口信息，否则新建一个新的表项插入到哈希表中。这里需要注意的是，每次插入新的表项时，需要更新访问时间。同理，函数中需要线程互斥锁，因为多个线程可能同时访问转发表（比如之后的老化操作）。
+
+\subsection{实现转发表的老化操作}
+
+\begin{lstlisting}[language=C]
+    // sweeping mac_port table, remove the entry which has not been visited in the
+    // last 30 seconds.
+    int sweep_aged_mac_port_entry()
+    {
+        // TODO: implement the sweeping process here
+        // fprintf(stdout, "TODO: implement the sweeping process here.\n");
+        mac_port_entry_t *entry, *q;
+        int n = 0;
+        time_t now = time(NULL);
+        pthread_mutex_lock(&mac_port_map.lock);
+        
+        for (int i = 0; i < HASH_8BITS; i++) {
+            list_for_each_entry_safe(entry, q, &mac_port_map.hash_table[i], list) {
+                if ((int)(now - entry->visited) > MAC_PORT_TIMEOUT) {
+                    list_delete_entry(&entry->list);
+                    free(entry);
+                    n++;
+                }
+            }
+        }
+    
+        pthread_mutex_unlock(&mac_port_map.lock);
+        return n;
+    }
+\end{lstlisting}
+
+老化操作是删除那些访问时间超过30秒的表项，即扫描转发表，清理那些当前时间与上次访问时间之差大于30秒的表项。这里需要注意的是，老化操作是线程安全的，因为在老化操作时，可能有其他线程在访问转发表（比如插入操作）。
+
+\subsection{实现数据包的广播操作}
+
+代码与实验一中的相同，这里不再赘述。
+
+\subsection{实现数据包的处理}
+
+\begin{lstlisting}[language=C]
+    // handle packet
+    // 1. if the dest mac address is found in mac_port table, forward it; otherwise, 
+    // broadcast it.
+    // 2. put the src mac -> iface mapping into mac hash table.
+    // 3. release the memory of ``packet''
+    
+    // Note: the log & fprintf here are only used for debug, which should be commented 
+    // out for better performance.
+    void handle_packet(iface_info_t *iface, char *packet, int len)
+    {
+        // TODO: implement the packet forwarding process here
+        // fprintf(stdout, "TODO: implement the packet forwarding process here.\n");
+    
+        struct ether_header *eh = (struct ether_header *)packet;
+        // log(DEBUG, "the dst mac address is " ETHER_STRING ".\n", ETHER_FMT(eh->ether_dhost));
+    
+        iface_info_t *dst_iface = lookup_port(eh->ether_dhost);
+        if (dst_iface) 
+            iface_send_packet(dst_iface, packet, len);
+        else 
+            broadcast_packet(iface, packet, len);
+    
+        insert_mac_port(eh->ether_shost, iface);
+    
+        free(packet);
+    }
+\end{lstlisting}
+
+在这个函数里，我们首先解析数据包，然后查找目的mac地址对应的接口信息，如果找到了，就转发数据包，否则广播发送数据包。接着将源mac地址和接口信息插入到转发表中，最后释放数据包的内存。
+
+\subsection{测量交换机转发的性能与集线器广播的性能对比}
+
+拓扑图如下：
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.35\textwidth]{topo1.png}
+    \caption{交换机网络拓扑图}
+\end{figure}
+
+与实验一中的拓扑相同，这里直接开始测量交换机转发的性能。
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.7\textwidth]{h1toh2_2.png}
+    \caption{h1向h2测量}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.7\textwidth]{h1toh3_2.png}
+    \caption{h1向h3测量}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.7\textwidth]{h2toh1_2.png}
+    \caption{h2向h1测量}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.7\textwidth]{h3toh1_2.png}
+    \caption{h3向h1测量}
+\end{figure}
+
+在h1向h2测量和h1向h3测量中，实验结果与实验一差距较大，速率已经接近理论带宽值。这是因为交换机网络中，数据包除了第一次转发表为空之外不会被广播，而是根据目的mac地址直接转发，所以不会出现竞争关系，速率更接近理论带宽值，带宽得到了充分利用。
+
+h2向h1测量和h3向h1测量的结果也与预期一致，速率接近理论带宽值，这是因为路径不是竞争关系，所以速率应该会更接近理论带宽值。这个原因与实验一中的解释相同。
+
+总体而言，交换机网络的性能要好于集线器广播网络，尤其是当广播网络因各种各样原因导致数据包竞争时，交换机网络的性能优势更加明显。即便首次传播时需要进行广播，但是交换机网络会学习到目的mac地址，之后的数据包都会直接转发，不会再广播，这样就避免了数据包竞争，提高了网络性能。
+
+\section{实验总结}
+
+本次实验主要是关于交换机网络的实验，我实现了转发表的查询、插入和老化操作，以及数据包的转发和广播操作，验证了交换机网络的性能优势。实验过程中，我对交换机网络的工作原理有了更深入的了解，交换机网络会学习到目的mac地址，之后的数据包都会直接转发，不会再广播，这样就避免了数据包竞争，提高了网络性能。而集线器广播网络则会占据更多的网络资源，效率低下。这也是交换机网络取代集线器网络的原因之一。
 \end{document}
