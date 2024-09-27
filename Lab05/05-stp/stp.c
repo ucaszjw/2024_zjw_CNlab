@@ -167,9 +167,16 @@ static stp_port_t *locate_root_port(stp_t *stp)
 
 	for (int i = 0; i < stp->nports; i++){
 		current_port = &stp->ports[i];
-		if (!stp_port_is_designated(current_port) && (config_is_superior(current_port, root_port->designated_root, root_port->designated_cost, root_port->designated_switch, root_port->designated_port) || !root_port))
+		if (!stp_port_is_designated(current_port)){
+			if(root_port){
+				if(config_is_superior(current_port, root_port->designated_root, root_port->designated_cost, root_port->designated_switch, root_port->port_id))
+					root_port = current_port;
+			}
+			else
 				root_port = current_port;
+		}
 	}
+			
 	return root_port;
 }
 
@@ -187,7 +194,7 @@ static void stp_handle_config_packet(stp_t *stp, stp_port_t *p,
 
 	//  if config of p is superior and p is designated, just send config
 	if (config_is_superior(p, designated_root, root_path_cost, switch_id, port_id) && stp_port_is_designated(p))
-		stp_port_send_config(p);
+			stp_port_send_config(p);		
 	// if config of entry is superior
 	else {
 		// 1. replace config of p with config of entry
@@ -215,8 +222,8 @@ static void stp_handle_config_packet(stp_t *stp, stp_port_t *p,
 		for (int i = 0; i < stp->nports; i++){
 			stp_port_t* current_port = &stp->ports[i];
 			if (root_port && !stp_port_is_designated(current_port) && !config_is_superior(current_port, stp->designated_root, stp->root_path_cost, stp->switch_id, current_port->port_id)){
-				current_port->designated_switch = stp->switch_id;
-				current_port->designated_port = current_port->port_id;
+						current_port->designated_switch = stp->switch_id;
+						current_port->designated_port = current_port->port_id;
 			}
 		}
 
