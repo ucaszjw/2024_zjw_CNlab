@@ -138,11 +138,104 @@ void *stp_timer_routine(void *arg)
 	return NULL;
 }
 
+// return true if config of p is superior to the received config
+static bool config_is_superior(stp_port_t *p, u64 designated_root, u32 root_path_cost, u64 switch_id, u16 port_id)
+{
+	if (p->designated_root < designated_root)
+		return true;
+	else if (p->designated_root > designated_root)
+		return false;
+	else if (p->designated_cost < root_path_cost)
+		return true;
+	else if (p->designated_cost > root_path_cost)
+		return false;
+	else if (p->designated_switch < switch_id)
+		return true;
+	else if (p->designated_switch > switch_id)
+		return false;
+	else if (p->designated_port < port_id)
+		return true;
+	else
+		return false;
+}
+
+// locate root port: the most superior non-designated port
+static stp_port_t *locate_root_port(stp_t *stp)
+{
+	stp_port_t *root_port = NULL;
+	stp_port_t *current_port;
+
+	for (int i = 0; i < stp->nports; i++){
+		current_port = &stp->ports[i];
+		if (!stp_port_is_designated(current_port) && (config_is_superior(current_port, root_port->designated_root, root_port->designated_cost, root_port->designated_switch, root_port->designated_port) || !root_port))
+				root_port = current_port;
+	}
+	return root_port;
+}
+
 static void stp_handle_config_packet(stp_t *stp, stp_port_t *p,
 		struct stp_config *config)
 {
 	// TODO: handle config packet here
-	fprintf(stdout, "TODO: handle config packet here.\n");
+	// fprintf(stdout, "TODO: handle config packet here.\n");
+	u64 designated_root = ntohll(config->root_id);
+	u32 root_path_cost = ntohl(config->root_path_cost);
+	u64 switch_id = ntohll(config->switch_id);
+	u16 port_id = ntohs(config->port_id);
+
+	int before_root = stp_is_root_switch(stp);
+
+	//  if config of p is superior and p is designated, just send config
+	if (config_is_superior(p, designated_root, root_path_cost, switch_id, port_id) && stp_port_is_designated(p))
+		stp_port_send_config(p);
+	// if config of entry is superior
+	else {
+		// 1. replace config of p with config of entry
+		p->designated_root = designated_root;
+		p->designated_switch = switch_id;
+		p->designated_port = port_id;
+		p->designated_cost = root_path_cost;
+
+		// 2. upgrade stp state
+		stp_port_t *root_port = locate_root_port(stp);
+
+		if (root_port){
+			stp->root_port = root_port;
+			stp->designated_root = root_port->designated_root;
+			stp->root_path_cost = root_port->designated_cost + root_port->path_cost;
+		}
+		else{
+			stp->root_port = NULL;
+			stp->designated_root = stp->switch_id;
+			stp->root_path_cost = 0;
+		}
+		
+		// 3. upgrade config of other ports
+		// for non-designated ports, if it's superior to all other ports, set it as designated
+		for (int i = 0; i < stp->nports; i++){
+			stp_port_t* current_port = &stp->ports[i];
+			if (root_port && !stp_port_is_designated(current_port) && !config_is_superior(current_port, stp->designated_root, stp->root_path_cost, stp->switch_id, current_port->port_id)){
+				current_port->designated_switch = stp->switch_id;
+				current_port->designated_port = current_port->port_id;
+			}
+		}
+
+		// for all designated ports, update designated root and cost
+		for (int i = 0; i < stp->nports; i++){
+			stp_port_t* current_port = &stp->ports[i];
+			if (stp_port_is_designated(current_port)){
+				current_port->designated_root = stp->designated_root;
+				current_port->designated_cost = stp->root_path_cost;
+			}
+		}
+
+		// 3. if root port is changed, stop hello timer
+		if (before_root && !stp_is_root_switch(stp))
+			stp_stop_timer(&stp->hello_timer);
+
+		// 4. send config from all designated ports
+		stp_send_config(stp);
+	}
 }
 
 static void *stp_dump_state(void *arg)
