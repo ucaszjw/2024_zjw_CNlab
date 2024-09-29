@@ -43,6 +43,7 @@
 \usepackage{listings} % 插入代码
 \usepackage{verbatim} % 多行注释
 \usepackage{ifplatform} % 检测编译平台
+\usepackage{pifont} % 圆圈数字
 \usetikzlibrary{shapes.geometric, arrows} % 引入流程图需要的库
 \usetikzlibrary{automata} % 引入automata库
 \usetikzlibrary{shapes,arrows,positioning,chains} % 引入positioning库
@@ -345,7 +346,318 @@
 
 \begin{figure}[H]
   \centering
-  \includegraphics[width=0.6\textwidth]{total.png}
+  \includegraphics[width=0.7\textwidth]{total.png}
   \caption{总体流程}
 \end{figure}
+
+网段中的两个节点，通过收发config消息，并比较自身收端口config和对端发端口config的优先级，来决定自己的状态。如果收到的config优先级高，说明该网段应该通过对方端口连接根节点，需要进行以下操作：
+
+\begin{enumerate}
+  \item 将本端口的config替换为收到的config消息(\ding{174}) ，本端口为非指定端口；
+  \item 更新节点状态(\ding{175})；
+  \item 更新其余(Other)端口的config(\ding{176})；
+  \item 如果节点由根节点变为非根节点，停止hello定时器；
+  \item 将更新后的config从每个指定端口转发出去(\ding{172})。
+\end{enumerate}
+
+如果收到的config优先级低，则该网段应该通过本端口存储config对应的端口连接根节点，只需要发送config消息(\ding{172})告知对方优先级更高的config。
+
+\subsection{比较config优先级}
+
+比较config优先级的操作如下图所示：
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.7\textwidth]{compare.png}
+  \caption{比较config优先级}
+\end{figure}
+
+转化为C代码如下：
+
+\begin{lstlisting}[language=C]
+  // return true if config of p is superior to the received config
+  static bool config_is_superior(stp_port_t *p, u64 designated_root, u32 root_path_cost, u64 switch_id, u16 port_id)
+  {
+    if (p->designated_root < designated_root)
+      return true;
+    else if (p->designated_root > designated_root)
+      return false;
+    else if (p->designated_cost < root_path_cost)
+      return true;
+    else if (p->designated_cost > root_path_cost)
+      return false;
+    else if (p->designated_switch < switch_id)
+      return true;
+    else if (p->designated_switch > switch_id)
+      return false;
+    else if (p->designated_port < port_id)
+      return true;
+    else
+      return false;
+  }
+\end{lstlisting}
+
+这里的\texttt{stp_port_t *p}表示自身收端口，按照上图所示方法进行比较，如果自己的优先级更高，就返回\texttt{true}，否则返回\texttt{false}。
+
+优先级比较完之后，需要根据结果进行相应的操作。如果自己的优先级更高，就从指定端口发出config消息：
+
+\begin{lstlisting}[language=C]
+	u64 designated_root = ntohll(config->root_id);
+	u32 root_path_cost = ntohl(config->root_path_cost);
+	u64 switch_id = ntohll(config->switch_id);
+	u16 port_id = ntohs(config->port_id);
+	//  if config of p is superior and p is designated, just send config
+	if (config_is_superior(p, designated_root, root_path_cost, switch_id, port_id) && stp_port_is_designated(p))
+			stp_port_send_config(p);
+\end{lstlisting}
+
+如果自己的优先级更低，所需的操作较多，在后面一一叙述。
+
+\subsection{更新本端口config}
+
+这一部分比较简单，只需要将本端口的config的各个域更新为收到的config的各个域即可：
+
+\begin{lstlisting}[language=C]
+  // 1. replace config of p with config of entry
+  p->designated_root = designated_root;
+  p->designated_switch = switch_id;
+  p->designated_port = port_id;
+  p->designated_cost = root_path_cost;
+\end{lstlisting}
+
+\subsection{更新节点状态}
+
+首先遍历所有端口，满足如下条件的为根端口(root\_port)：
+
+\begin{enumerate}
+  \item 该端口是非指定端口；
+  \item 该端口的优先级要高于所有其余非指定端口(\ding{173})；
+\end{enumerate}
+
+我先写了一个函数来寻找根端口：
+
+\begin{lstlisting}[language=C]
+  // locate root port: the most superior non-designated port
+  static stp_port_t *locate_root_port(stp_t *stp)
+  {
+    stp_port_t *root_port = NULL;
+    stp_port_t *current_port;
+  
+    for (int i = 0; i < stp->nports; i++){
+      current_port = &stp->ports[i];
+      if (!stp_port_is_designated(current_port)){
+        if(root_port){
+          if(config_is_superior(current_port, root_port->designated_root, root_port->designated_cost, root_port->designated_switch, root_port->port_id))
+            root_port = current_port;
+        }
+        else
+          root_port = current_port;
+      }
+    }
+        
+    return root_port;
+  }
+\end{lstlisting}
+
+然后更新节点状态，选择通过root\_port连接到根节点：
+
+\begin{lstlisting}[language=C]
+  // 2. upgrade stp state
+  stp_port_t *root_port = locate_root_port(stp);
+
+  if (root_port){
+    stp->root_port = root_port;
+    stp->designated_root = root_port->designated_root;
+    stp->root_path_cost = root_port->designated_cost + root_port->path_cost;
+  }
+  else{
+    stp->root_port = NULL;
+    stp->designated_root = stp->switch_id;
+    stp->root_path_cost = 0;
+  }
+\end{lstlisting}
+
+这里\texttt{stp->root_path_cost}的更新是因为路径开销等于路径上全部链路开销之和。
+
+\subsection{更新其余端口config}
+
+更新其余端口的config有多种情况：
+
+\begin{enumerate}
+  \item 非指定端口 $\rightarrow$ 非指定端口（不需要处理）；
+  \item 指定端口 $\rightarrow$ 指定端口（需要更新信息，对于所有指定端口，更新其认为的根节点和路径开销）；
+  \item 指定端口 $\rightarrow$ 非指定端口（只有收到config时可能，已在之前的函数中处理）；
+  \item 非指定端口 $\rightarrow$ 指定端口（如果一个端口为非指定端口，且其Config较网段内其他端口优先级更高(\ding{173})，那么该端口成为指定端口）。
+\end{enumerate}
+
+代码如下：
+
+\begin{lstlisting}[language=C]
+  // 3. upgrade config of other ports
+  // for non-designated ports, if it's superior to all other ports, set it as designated
+  for (int i = 0; i < stp->nports; i++){
+    stp_port_t* current_port = &stp->ports[i];
+    if (root_port && !stp_port_is_designated(current_port) && !config_is_superior(current_port, stp->designated_root, stp->root_path_cost, stp->switch_id, current_port->port_id)){
+          current_port->designated_switch = stp->switch_id;
+          current_port->designated_port = current_port->port_id;
+    }
+  }
+
+  // for all designated ports, update designated root and cost
+  for (int i = 0; i < stp->nports; i++){
+    stp_port_t* current_port = &stp->ports[i];
+    if (stp_port_is_designated(current_port)){
+      current_port->designated_root = stp->designated_root;
+      current_port->designated_cost = stp->root_path_cost;
+    }
+  }
+\end{lstlisting}
+
+\subsection{停止hello定时器}
+
+如果节点由根节点变为非根节点，需要停止hello定时器：
+
+\begin{lstlisting}[language=C]
+  // get before_root before receiving config
+  int before_root = stp_is_root_switch(stp);
+
+  // 4. if root port is changed, stop hello timer
+  if (before_root && !stp_is_root_switch(stp))
+    stp_stop_timer(&stp->hello_timer);
+\end{lstlisting}
+
+\subsection{转发config}
+
+最后，将更新后的config从每个指定端口转发出去：
+
+\begin{lstlisting}[language=C]
+  // 5. send config from all designated ports
+  stp_send_config(stp);
+\end{lstlisting}
+
+\section{实验结果}
+
+\subsection{使用four\_node\_ring.py}
+
+使用four\_node\_ring.py拓扑，运行stp程序，可以得到如下结果：
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.7\textwidth]{four_node_ring.png}
+  \caption{four\_node\_ring.py拓扑}
+\end{figure}
+
+四节点环路拓扑如下：
+
+\begin{lstlisting}[language=Python]
+  class RingTopo(Topo):
+  def build(self):
+      b1 = self.addHost('b1')
+      b2 = self.addHost('b2')
+      b3 = self.addHost('b3')
+      b4 = self.addHost('b4')
+
+      self.addLink(b1, b2)
+      self.addLink(b1, b3)
+      self.addLink(b2, b4)
+      self.addLink(b3, b4)
+\end{lstlisting}
+
+\begin{figure}[H]
+  \centering
+  \subfigure[拓扑图]{
+    \includegraphics[width=0.4\textwidth]{four_node_ring_topo.png}
+  }
+  \subfigure[stp结果]{
+    \includegraphics[width=0.4\textwidth]{four_node_ring_result.png}
+  }
+  \caption{four\_node\_ring.py拓扑}
+\end{figure}
+
+\subsection{自定义拓扑}
+
+我自定义了一个七节点完全图拓扑seven_node_complete.py，运行stp程序，可以得到如下结果：
+
+\begin{figure}[H]
+  \centering
+  \subfigure{
+    \includegraphics[width=0.7\textwidth]{seven_node_complete_1.png}
+  }
+  \subfigure{
+    \includegraphics[width=0.7\textwidth]{seven_node_complete_2.png}
+  }
+\end{figure}
+
+\begin{figure}[H]
+  \centering
+  \subfigure{
+    \includegraphics[width=0.7\textwidth]{seven_node_complete_3.png}
+  }
+  \hspace{0pt}
+  \subfigure{
+    \includegraphics[width=0.7\textwidth]{seven_node_complete_4.png}
+  }
+  \caption{七节点完全图拓扑}  
+\end{figure}
+
+七节点完全图拓扑如下：
+
+\begin{lstlisting}[language=Python]
+  class CompleteTopo(Topo):
+  def build(self):
+      b1 = self.addHost('b1')
+      b2 = self.addHost('b2')
+      b3 = self.addHost('b3')
+      b4 = self.addHost('b4')
+      b5 = self.addHost('b5')
+      b6 = self.addHost('b6')
+      b7 = self.addHost('b7')
+
+      self.addLink(b1, b2)
+      self.addLink(b1, b3)
+      self.addLink(b1, b4)
+      self.addLink(b1, b5)
+      self.addLink(b1, b6)
+      self.addLink(b1, b7)
+      # code omitted
+      self.addLink(b5, b6)
+      self.addLink(b5, b7)
+      self.addLink(b6, b7)
+\end{lstlisting}
+
+\begin{figure}[H]
+  \centering
+  \subfigure[七节点完全图拓扑]{  
+    \begin{tikzpicture}
+      \foreach \i in {1,...,7} {
+        \node[draw, circle] (b\i) at ({360/7 * (\i - 1) + 90}:2) {b\i};
+      }
+      \foreach \i in {1,...,7} {
+        \foreach \j in {\i,...,7} {
+          \ifnum\i<\j
+            \draw (b\i) -- (b\j);
+          \fi
+        }
+      }
+    \end{tikzpicture}
+  }
+  \subfigure[stp结果]{
+    \begin{tikzpicture}
+      \foreach \i in {1,...,7} {
+        \node[draw, circle] (b\i) at ({360/7 * (\i - 1) + 90}:2) {b\i};
+      }
+      \foreach \i in {2,...,7} {
+        \draw (b\i) -- (b1);
+      }
+    \end{tikzpicture}
+  }
+  \caption{七节点完全图拓扑}
+\end{figure}
+
+可以看出算法正确地计算出了最小生成树拓扑。
+
+\section{实验总结}
+
+本次实验实现了生成树运行机制，对于给定拓扑，计算输出相应状态下的最小生成树拓扑。实验中，我实现了比较config优先级、更新本端口config、更新节点状态、更新其余端口config、停止hello定时器、转发config等操作，最终使用four\_node\_ring.py和自定义的七节点完全图拓扑进行了测试，得到了正确的结果。这让我更加深入地理解了生成树算法的运行机制。
+
 \end{document}

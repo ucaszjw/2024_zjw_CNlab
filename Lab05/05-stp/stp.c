@@ -236,11 +236,11 @@ static void stp_handle_config_packet(stp_t *stp, stp_port_t *p,
 			}
 		}
 
-		// 3. if root port is changed, stop hello timer
+		// 4. if root port is changed, stop hello timer
 		if (before_root && !stp_is_root_switch(stp))
 			stp_stop_timer(&stp->hello_timer);
 
-		// 4. send config from all designated ports
+		// 5. send config from all designated ports
 		stp_send_config(stp);
 	}
 }
