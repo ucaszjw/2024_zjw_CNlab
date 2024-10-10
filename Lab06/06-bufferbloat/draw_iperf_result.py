@@ -1,3 +1,5 @@
+# Description: Read data from all iperf_result_{tc_way}.txt files and draw a line chart to show the bandwidth over time. Already matched with content in all the files above.
+
 import matplotlib.pyplot as plt
 
 # 定义文件名和标签

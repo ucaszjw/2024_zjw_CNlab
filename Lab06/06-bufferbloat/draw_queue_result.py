@@ -1,3 +1,5 @@
+# Description: Read data from all qlen-{maxq} deirectories and draw the plot of cwnd, qlen and rtt over time. Already matched with content in all the files above.
+
 import matplotlib.pyplot as plt
 import re
 
