@@ -44,7 +44,7 @@
   时间戳, <任意字符>, time=值 ms
   ```
 
-## `draw_iperf_result.py` 脚本
+## [`draw_iperf_result.py`](06-bufferbloat/draw_iperf_result.py) 脚本
 
 该脚本读取所有 `iperf_result_{tc_way}.txt` 文件的数据，并绘制带宽随时间变化的折线图。
 
