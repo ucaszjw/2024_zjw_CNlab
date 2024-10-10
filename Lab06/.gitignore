@@ -8,3 +8,4 @@ codel
 taildrop
 red
 _pycache_
+*.txt
