@@ -2,11 +2,11 @@ import matplotlib.pyplot as plt
 
 # 定义文件名和标签
 files = [
-    ("iperf_result_20.txt", "Result 20"),
-    ("iperf_result_40.txt", "Result 40"),
-    ("iperf_result_60.txt", "Result 60"),
-    ("iperf_result_80.txt", "Result 80"),
-    ("iperf_result_100.txt", "Result 100")
+    ("iperf_result_20.txt", "maxq 20"),
+    ("iperf_result_40.txt", "maxq 40"),
+    ("iperf_result_60.txt", "maxq 60"),
+    ("iperf_result_80.txt", "maxq 80"),
+    ("iperf_result_100.txt", "maxq 100")
 ]
 
 # 初始化数据存储
