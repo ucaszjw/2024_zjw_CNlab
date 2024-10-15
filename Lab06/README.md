@@ -24,7 +24,7 @@
    - `qlen_plot.png`：队列长度随时间变化的图像
    - `rtt_plot.png`：往返时间随时间变化的图像
 
-### 数据格式（若你的txt文件是通过[`reproduce_bufferbloat.py`](06-bufferbloat/reproduce_bufferbloat.py)生成的，请忽略此部分）
+### 数据格式（必须检查！如果数据格式不同，会导致图片无法正确生成）
 
 - `cwnd.txt` 文件格式：
 
@@ -50,7 +50,7 @@
 
 ### 使用方法
 
-1. 确保在当前目录中存在以下文件：
+1. 确保在当前目录中存在以下文件（使用`mitigate_bufferbloat.py`生成的文件名均为`iperf_result.txt`，每次生成之后需手动改名：
    - `iperf_result_20.txt`
    - `iperf_result_40.txt`
    - `iperf_result_60.txt`
@@ -66,9 +66,9 @@
 3. 脚本将生成以下图像文件：
    - `bandwidth_over_time.png`：带宽随时间变化的图像
 
-### 数据格式（若你的txt文件是通过[`mitigate_bufferbloat.py`](06-bufferbloat/mitigate_bufferbloat.py)生成的，请忽略此部分）
+### 数据格式（必须检查！如果数据格式不同，会导致图片无法正确生成）
 
-- `iperf_result_{tc_way}.txt` 文件格式：
+- `iperf_result_{tc_way}.txt` 文件格式（注意！时间戳中间不能有空格）：
 
   ```plaintext
   [  1] 时间戳 sec <任意字符> 带宽 Mbits/sec
