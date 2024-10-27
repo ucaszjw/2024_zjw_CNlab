@@ -43,9 +43,6 @@ class MultiRouterTopo(Topo):
         self.addLink(r2, r3)
         self.addLink(r3, h2)
 
-        # 添加更多的连接，构建完整的拓扑
-        self.addLink(r1, r3)
-
 if __name__ == '__main__':
     check_scripts()
 
@@ -71,14 +68,14 @@ if __name__ == '__main__':
     h1.cmd('route add default gw 10.0.1.2')
     h2.cmd('route add default gw 10.0.4.2')
 
-    r1.cmd('route add -net 10.0.4.0/24 gw 10.0.1.2')
-    r1.cmd('route add -net 10.0.3.0/24 gw 10.0.2.2')
+    r1.cmd('route add -net 10.0.3.0 netmask 255.255.255.0 gw 10.0.2.2 dev r1-eth1')
+    r1.cmd('route add -net 10.0.4.0 netmask 255.255.255.0 gw 10.0.2.2 dev r1-eth1')
 
-    r2.cmd('route add -net 10.0.1.0/24 gw 10.0.2.1')
-    r2.cmd('route add -net 10.0.4.0/24 gw 10.0.3.1')
+    r2.cmd('route add -net 10.0.1.0 netmask 255.255.255.0 gw 10.0.2.1 dev r2-eth0')
+    r2.cmd('route add -net 10.0.4.0 netmask 255.255.255.0 gw 10.0.3.2 dev r2-eth1')
 
-    r3.cmd('route add -net 10.0.1.0/24 gw 10.0.3.2')
-    r3.cmd('route add -net 10.0.2.0/24 gw 10.0.3.1')
+    r3.cmd('route add -net 10.0.1.0 netmask 255.255.255.0 gw 10.0.3.1 dev r3-eth0')
+    r3.cmd('route add -net 10.0.2.0 netmask 255.255.255.0 gw 10.0.3.1 dev r3-eth0')
 
     # 执行脚本以禁用某些功能
     for n in (h1, h2, r1, r2, r3):
