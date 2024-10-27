@@ -31,7 +31,7 @@ void handle_packet(iface_info_t *iface, char *packet, int len)
 			handle_arp_packet(iface, packet, len);
 			break;
 		default:
-			log(ERROR, "Unknown packet type 0x%04hx, ingore it.", \
+			log(ERROR, "Unknown packet type 0x%04hx, ignore it.", \
 					ntohs(eh->ether_type));
 			break;
 	}
