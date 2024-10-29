@@ -21,20 +21,25 @@ void handle_ip_packet(iface_info_t *iface, char *packet, int len)
 	u8 protocol = iphdr->protocol;
 	u8 type = icmphdr->type;
 
+	// check if the packet is ICMP echo request and the destination IP address is equal to the IP address of the iface
 	if (dest == iface->ip && protocol == IPPROTO_ICMP && type == ICMP_ECHOREQUEST) {
 		icmp_send_packet(packet, len, ICMP_ECHOREPLY, 0);
 		free(packet);
 		return;
 	}
 
+	// forward the packet
 	iphdr->ttl--;
+
+	// check if the TTL is less than or equal to 0
 	if (iphdr->ttl <= 0) {
 		icmp_send_packet(packet, len, ICMP_TIME_EXCEEDED, ICMP_EXC_TTL);
 		free(packet);
 		return;
 	}
-
+	// update the checksum of the IP header
 	iphdr->checksum = ip_checksum(iphdr);
+	// search the routing table for the longest prefix match
 	rt_entry_t *match = longest_prefix_match(dest);
 	if (match == NULL) {
 		icmp_send_packet(packet, len, ICMP_DEST_UNREACH, ICMP_NET_UNREACH);
@@ -42,6 +47,7 @@ void handle_ip_packet(iface_info_t *iface, char *packet, int len)
 		return;
 	}
 
+	// check if the destination IP address is in the same network with the iface
 	u32 nextip;
 	if (match->gw == 0)
 		nextip = dest;

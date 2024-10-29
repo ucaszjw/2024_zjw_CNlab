@@ -78,6 +78,8 @@ void arpcache_append_packet(iface_info_t *iface, u32 ip4, char *packet, int len)
 	pthread_mutex_lock(&arpcache.lock);
 	struct arp_req *req_entry = NULL;
 	struct arp_req *req_q;
+
+	// find the entry with the same IP address
 	list_for_each_entry_safe(req_entry, req_q, &(arpcache.req_list), list) {
 		if (req_entry->ip4 == ip4) {
 			struct cached_pkt *pkt_entry = (struct cached_pkt *)malloc(sizeof(struct cached_pkt));
@@ -90,6 +92,7 @@ void arpcache_append_packet(iface_info_t *iface, u32 ip4, char *packet, int len)
 		}
 	}
 
+	// no entry found, malloc a new entry
 	req_entry = (struct arp_req *)malloc(sizeof(struct arp_req));
 	init_list_head(&(req_entry->list));
 	init_list_head(&(req_entry->cached_packets));
@@ -116,6 +119,8 @@ void arpcache_insert(u32 ip4, u8 mac[ETH_ALEN])
 	// fprintf(stderr, "TODO: insert ip->mac entry, and send all the pending packets.\n");
 	pthread_mutex_lock(&arpcache.lock);
 	int i;
+
+	// update the entry if it already exists
 	for (i = 0; i < MAX_ARP_SIZE; i++) {
 		if (arpcache.entries[i].valid && arpcache.entries[i].ip4 == ip4){
 			arpcache.entries[i].added = time(NULL);
@@ -125,10 +130,12 @@ void arpcache_insert(u32 ip4, u8 mac[ETH_ALEN])
 		}
 	}
 
+	// search for an empty entry
 	for (i = 0; i < MAX_ARP_SIZE; i++) 
 		if (!arpcache.entries[i].valid) 
 			break;
 	
+	// if no empty entry, replace a random entry
 	if (i == MAX_ARP_SIZE)
 		i = rand() % MAX_ARP_SIZE;
 
@@ -137,6 +144,7 @@ void arpcache_insert(u32 ip4, u8 mac[ETH_ALEN])
 	arpcache.entries[i].valid = 1;
 	memcpy(arpcache.entries[i].mac, mac, ETH_ALEN);
 
+	// send all the pending packets with the same IP address of the new entry
 	struct arp_req *req_entry = NULL, *req_q;
 	list_for_each_entry_safe(req_entry, req_q, &(arpcache.req_list), list) {
 		if (req_entry->ip4 == ip4) {
