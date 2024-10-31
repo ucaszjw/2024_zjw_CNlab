@@ -14,6 +14,7 @@ void icmp_send_packet(const char *in_pkt, int len, u8 type, u8 code)
 	struct iphdr *iphdr = packet_to_ip_hdr(in_pkt);
 	char *ipdata = IP_DATA(iphdr);
 
+	// calculate icmp packet length
 	int icmp_len;
 	if (type == ICMP_ECHOREPLY)
 		icmp_len = ntohs(iphdr->tot_len) - IP_HDR_SIZE(iphdr);
@@ -24,6 +25,7 @@ void icmp_send_packet(const char *in_pkt, int len, u8 type, u8 code)
 	char *res = (char *)malloc(res_len);
 	memset(res, 0, res_len);
 
+	// fill ip header
 	struct iphdr *res_iphdr = packet_to_ip_hdr(res);
 	if (type == ICMP_ECHOREPLY)
 		ip_init_hdr(res_iphdr, ntohl(iphdr->daddr), ntohl(iphdr->saddr), icmp_len + IP_BASE_HDR_SIZE, IPPROTO_ICMP);
@@ -37,6 +39,8 @@ void icmp_send_packet(const char *in_pkt, int len, u8 type, u8 code)
 	}
 
 	char *res_ipdata = IP_DATA(res_iphdr);
+
+	// fill icmp header and data
 	struct icmphdr *res_icmphdr = (struct icmphdr *)res_ipdata;
 	if (type == ICMP_ECHOREPLY)
 		memcpy(res_ipdata, ipdata, icmp_len);
@@ -47,5 +51,6 @@ void icmp_send_packet(const char *in_pkt, int len, u8 type, u8 code)
 	res_icmphdr->code = code;
 	res_icmphdr->checksum = icmp_checksum(res_icmphdr, icmp_len);
 
+	// send icmp packet
 	ip_send_packet(res, res_len);
 }
