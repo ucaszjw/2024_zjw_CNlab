@@ -95,8 +95,6 @@ void *sending_mospf_hello_thread(void *param)
 			ethdr->ether_type = htons(ETH_P_IP);
 
 			iface_send_packet(iface, packet, packet_len);
-
-			free(packet);
 		}
 
 		pthread_mutex_unlock(&mospf_lock);
