@@ -5,6 +5,7 @@
 #include "rtable.h"
 
 #include "ip.h"
+#include "arp.h"
 
 #include "list.h"
 #include "log.h"
@@ -24,6 +25,14 @@ int graph[MAX_NODE_NUM][MAX_NODE_NUM];
 int prev[MAX_NODE_NUM];
 int stack[MAX_NODE_NUM];
 int stack_top;
+
+void *sending_mospf_hello_thread(void *param);
+void *sending_mospf_lsu_thread(void *param);
+void *checking_nbr_thread(void *param);
+void *checking_database_thread(void *param);
+void send_mospf_lsu_packet(void);
+void update_rtable(void);
+void print_database(void);
 
 void mospf_init()
 {
@@ -45,11 +54,6 @@ void mospf_init()
 	init_mospf_db();
 }
 
-void *sending_mospf_hello_thread(void *param);
-void *sending_mospf_lsu_thread(void *param);
-void *checking_nbr_thread(void *param);
-void *checking_database_thread(void *param);
-void send_mospf_lsu_packet(void);
 
 void mospf_run()
 {
@@ -191,7 +195,7 @@ void handle_mospf_hello(iface_info_t *iface, const char *packet, int len)
 	nbr->nbr_ip = ntohl(iphdr->saddr);
 	nbr->nbr_mask = ntohl(hello->mask);
 	nbr->alive = 0;
-	inst_list_head(&nbr->list);
+	init_list_head(&nbr->list);
 	list_add_tail(&nbr->list, &iface->nbr_list);
 	iface->num_nbr++;
 
@@ -267,7 +271,7 @@ void send_mospf_lsu_packet()
 				memcpy(mospf_message, packet, mospf_len);
 				ip_init_hdr(iphdr, iface->ip, nbr->nbr_ip, mospf_len + IP_BASE_HDR_SIZE, IPPROTO_MOSPF);
 				memcpy(ethdr->ether_shost, iface->mac, ETH_ALEN);
-				eh->ether_type = htons(ETH_P_IP);
+				ethdr->ether_type = htons(ETH_P_IP);
 
 				iface_send_packet_by_arp(iface, nbr->nbr_ip, packet_send, ETHER_HDR_SIZE + IP_BASE_HDR_SIZE + mospf_len);
 			}
