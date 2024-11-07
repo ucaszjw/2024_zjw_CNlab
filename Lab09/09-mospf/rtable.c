@@ -53,15 +53,15 @@ void print_rtable()
 {
 	// Print the route records
 	fprintf(stdout, "Routing Table:\n");
-	fprintf(stdout, "dest\tmask\tgateway\tif_name\n");
-	fprintf(stdout, "--------------------------------------\n");
+	fprintf(stdout, "dest\t\tmask\t\tgateway\t\tif_name\n");
+	fprintf(stdout, "----------------------------------------------------------------------\n");
 	rt_entry_t *entry = NULL;
 	list_for_each_entry(entry, &rtable, list) {
-		fprintf(stdout, IP_FMT"\t"IP_FMT"\t"IP_FMT"\t%s\n", \
-				HOST_IP_FMT_STR(entry->dest), \
-				HOST_IP_FMT_STR(entry->mask), \
-				HOST_IP_FMT_STR(entry->gw), \
+		fprintf(stdout, IP_FMT"\t"IP_FMT"\t"IP_FMT"\t%s\n", 
+				HOST_IP_FMT_STR(entry->dest), 
+				HOST_IP_FMT_STR(entry->mask), 
+				HOST_IP_FMT_STR(entry->gw), 
 				entry->if_name);
 	}
-	fprintf(stdout, "--------------------------------------\n");
+	fprintf(stdout, "----------------------------------------------------------------------\n");
 }
