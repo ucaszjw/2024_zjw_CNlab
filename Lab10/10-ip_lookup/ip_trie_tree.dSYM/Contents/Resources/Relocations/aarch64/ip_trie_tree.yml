@@ -1,0 +1,5 @@
+---
+triple:          'arm64-apple-darwin'
+binary-path:     ip_trie_tree
+relocations:     []
+...
