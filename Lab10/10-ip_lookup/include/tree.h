@@ -29,7 +29,7 @@ typedef struct node{
 typedef struct node_advance{
     bool type; //I_NODE or M_NODE
     uint32_t port;
-    int prefix_diff;
+    int prefix_diff; // 0 for even, 1 for odd
     struct node_advance* child[4];
 }node_advance_t;
 

@@ -6,6 +6,8 @@
 node_t *root;
 node_advance_t *notmatch;
 node_advance_t *triemap[MAP_NUM];
+unsigned long size = 0;
+unsigned long size_advance = 0;
 // return an array of ip represented by an unsigned integer, the length of array is TEST_SIZE
 uint32_t* read_test_data(const char* lookup_file)
 {
@@ -43,6 +45,7 @@ void create_tree(const char* forward_file)
     root->type = I_NODE;
     root->lchild = NULL;
     root->rchild = NULL;
+    size += sizeof(node_t);
 
     FILE *fp = fopen(forward_file, "r");
     if (fp == NULL) {
@@ -71,6 +74,7 @@ void create_tree(const char* forward_file)
                     cur->lchild->type = I_NODE;
                     cur->lchild->lchild = NULL;
                     cur->lchild->rchild = NULL;
+                    size += sizeof(node_t);
                 }
                 cur = cur->lchild;
             }
@@ -80,6 +84,7 @@ void create_tree(const char* forward_file)
                     cur->rchild->type = I_NODE;
                     cur->rchild->lchild = NULL;
                     cur->rchild->rchild = NULL;
+                    size += sizeof(node_t);
                 }
                 cur = cur->rchild;
             }
@@ -149,6 +154,7 @@ void create_tree_advance(const char* forward_file)
         triemap[i]->type = I_NODE;
         for (int j = 0; j < 4; j++)
             triemap[i]->child[j] = NULL;
+        size_advance += sizeof(node_advance_t);
     }
 
     FILE *fp = fopen(forward_file, "r");
@@ -186,6 +192,7 @@ void create_tree_advance(const char* forward_file)
                     for (int j = 0; j < 4; j++)
                         next->child[j] = NULL;
                     cur->child[cur_bit] = next;
+                    size_advance += sizeof(node_advance_t);
                 }
                 cur = next;
             }
@@ -204,6 +211,7 @@ void create_tree_advance(const char* forward_file)
                         for (int j = 0; j < 4; j++)
                             next->child[j] = NULL;
                         cur->child[start_bit + i] = next;
+                        size_advance += sizeof(node_advance_t);
                     }
                 }
             }
@@ -267,8 +275,3 @@ uint32_t *lookup_tree_advance(uint32_t* ip_vec)
         
     return port_vec;
 }
-
-
-
-
-

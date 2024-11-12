@@ -13,6 +13,8 @@ const char* basic_compare = "test/compare_file.txt";
 const char* advanced_lookup  = "test/lookup_file.txt";
 const char* advanced_compare = "test/compare_file.txt";
 
+extern unsigned long size;
+extern unsigned long size_advance;
 
 bool check_result(uint32_t* port_vec, const char* compare_filename);
 
@@ -52,8 +54,8 @@ int main(void)
     long advanced_interval = get_interval(tv_start,tv_end);
     
     printf("Dumping result......\n");
-    printf("basic_pass-%d\nbasic_lookup_time-%ldus\nadvance_pass-%d\nadvance_lookup_time-%ldus\n", \
-            basic_pass,basic_interval,advanced_pass,advanced_interval);
+    printf("basic_pass-%d\nbasic_lookup_time-%ldus\nbasic_lookup_size-%luMB\nadvance_pass-%d\nadvance_lookup_time-%ldus\nadvance_lookup_size-%luMB\n", \
+            basic_pass,basic_interval,size/1000000,advanced_pass,advanced_interval,size_advance/1000000);
 
     return 0;
 }
