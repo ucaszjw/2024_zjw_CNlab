@@ -13,8 +13,13 @@
 static struct nat_table nat;
 
 // get the interface from iface name
-static iface_info_t *if_name_to_iface(const char *if_name)
+static iface_info_t *if_name_to_iface(char *if_name)
 {
+	char *name_end = if_name;
+	while (*name_end != ' ' && *name_end != '\n' && *name_end != '\0')
+		name_end++;
+	*name_end = '\0';
+
 	iface_info_t *iface = NULL;
 	list_for_each_entry(iface, &instance->iface_list, list) {
 		if (strcmp(iface->name, if_name) == 0)
@@ -30,8 +35,8 @@ static int get_packet_direction(char *packet)
 {
 	// fprintf(stdout, "TODO: determine the direction of this packet.\n");
 	struct iphdr *iphdr = packet_to_ip_hdr(packet);
-	rt_entry_t *src = longest_prefix_match(iphdr->saddr);
-	rt_entry_t *dst = longest_prefix_match(iphdr->daddr);
+	rt_entry_t *src = longest_prefix_match(ntohl(iphdr->saddr));
+	rt_entry_t *dst = longest_prefix_match(ntohl(iphdr->daddr));
 
 	if (src->iface == nat.internal_iface && dst->iface == nat.external_iface)
 		return DIR_OUT;
@@ -56,6 +61,7 @@ void do_translation(iface_info_t *iface, char *packet, int len, int dir)
 	u16 rport = (dir == DIR_OUT) ? dport : sport;
 
 	char *str = (char *)malloc(6);
+	memset(str, 0, 6);
 	memcpy(str, &raddr, 4);
 	memcpy(str + 4, &rport, 2);
 	u8 hash = hash8(str, 6);
@@ -105,6 +111,14 @@ void do_translation(iface_info_t *iface, char *packet, int len, int dir)
 			free(entry);
 		}
 
+		return ;
+	}
+
+	if ((tcphdr->flags & TCP_SYN) == 0) {
+		fprintf(stderr, "Invalid packet, drop it.\n");
+		icmp_send_packet(packet, len, ICMP_DEST_UNREACH, ICMP_HOST_UNREACH);
+		free(packet);
+		pthread_mutex_unlock(&nat.lock);
 		return ;
 	}
 
@@ -236,9 +250,7 @@ int parse_config(const char *filename)
 
 	char *line = (char *)malloc(128);
 	while (fgets(line, 128, file)) {
-		if (line[0] == '\n' || line[0] == '#')
-			continue;
-		else if (line[0] == 'i') {
+		if (line[0] == 'i') {
 			char *if_name = line + 16;
 			nat.internal_iface = if_name_to_iface(if_name);
 			continue;
