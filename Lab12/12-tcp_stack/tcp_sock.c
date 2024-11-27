@@ -19,8 +19,8 @@ struct tcp_hash_table tcp_sock_table;
 
 inline void tcp_set_state(struct tcp_sock *tsk, int state)
 {
-	// log(DEBUG, IP_FMT":%hu switch state, from %s to %s.", \
-			HOST_IP_FMT_STR(tsk->sk_sip), tsk->sk_sport, \
+	log(DEBUG, IP_FMT":%hu switch state, from %s to %s.",
+			HOST_IP_FMT_STR(tsk->sk_sip), tsk->sk_sport,
 			tcp_state_str[tsk->state], tcp_state_str[state]);
 	tsk->state = state;
 }
@@ -77,8 +77,8 @@ void free_tcp_sock(struct tcp_sock *tsk)
 	// fprintf(stdout, "TODO: implement %s please.\n", __FUNCTION__);
 	tsk->ref_cnt -= 1;
 	if (tsk->ref_cnt == 0) {
-		// log(DEBUG, "free tcp sock: "IP_FMT":%hu -> "IP_FMT":%hu.", \
-				HOST_IP_FMT_STR(tsk->sk_sip), tsk->sk_sport, \
+		log(DEBUG, "free tcp sock: "IP_FMT":%hu -> "IP_FMT":%hu.",
+				HOST_IP_FMT_STR(tsk->sk_sip), tsk->sk_sport,
 				HOST_IP_FMT_STR(tsk->sk_dip), tsk->sk_dport);
 		free_ring_buffer(tsk->rcv_buf);
 		free_wait_struct(tsk->wait_connect);
@@ -98,8 +98,8 @@ struct tcp_sock *tcp_sock_lookup_established(u32 saddr, u32 daddr, u16 sport, u1
 
 	struct tcp_sock *tsk;
 	list_for_each_entry(tsk, list, hash_list) {
-		if (tsk->sk_sip == saddr && tsk->sk_dip == daddr
-		 && tsk->sk_sport == sport && tsk->sk_dport == dport)
+		if (saddr == tsk->sk_sip && daddr == tsk->sk_dip &&
+			sport == tsk->sk_sport && dport == tsk->sk_dport)
 			return tsk;
 	}
 
@@ -117,7 +117,7 @@ struct tcp_sock *tcp_sock_lookup_listen(u32 saddr, u16 sport)
 
 	struct tcp_sock *tsk;
 	list_for_each_entry(tsk, list, hash_list) {
-		if (tsk->sk_sport == sport)
+		if (sport == tsk->sk_sport)
 			return tsk;
 	}
 
@@ -163,8 +163,8 @@ void tcp_bind_unhash(struct tcp_sock *tsk)
 // lookup bind_table to check whether sport is in use
 static int tcp_port_in_use(u16 sport)
 {
-	int value = tcp_hash_function(0, 0, sport, 0);
-	struct list_head *list = &tcp_bind_sock_table[value];
+	int hash = tcp_hash_function(0, 0, sport, 0);
+	struct list_head *list = &tcp_bind_sock_table[hash];
 	struct tcp_sock *tsk;
 	list_for_each_entry(tsk, list, bind_hash_list) {
 		if (tsk->sk_sport == sport)
@@ -267,26 +267,26 @@ int tcp_sock_connect(struct tcp_sock *tsk, struct sock_addr *skaddr)
 {
 	// fprintf(stdout, "TODO: implement %s please.\n", __FUNCTION__);
 	int err = 0;
-	tsk->sk_sip = ntohl(skaddr->ip);
-	tsk->sk_sport = ntohs(skaddr->port);
 
+	tsk->sk_dip = ntohl(skaddr->ip);
+	tsk->sk_dport = ntohs(skaddr->port);
 	rt_entry_t *entry = longest_prefix_match(tsk->sk_dip);
 	if (!entry) {
-		// log(ERROR, "no route to "IP_FMT".", HOST_IP_FMT_STR(tsk->sk_dip));
+		log(ERROR, "no route to "IP_FMT".", HOST_IP_FMT_STR(tsk->sk_dip));
 		return -1;
 	}
 	tsk->sk_sip = entry->iface->ip;
 
 	err = tcp_sock_set_sport(tsk, 0);
 	if (err) {
-		// log(ERROR, "tcp sock set sport failed.");
+		log(ERROR, "tcp sock set sport failed.");
 		return err;
 	}
 
 	tcp_set_state(tsk, TCP_SYN_SENT);
 	err = tcp_hash(tsk);
 	if (err) {
-		// log(ERROR, "tcp sock hash failed.");
+		log(ERROR, "tcp sock hash failed.");
 		return err;
 	}
 
@@ -294,7 +294,7 @@ int tcp_sock_connect(struct tcp_sock *tsk, struct sock_addr *skaddr)
 
 	err = sleep_on(tsk->wait_connect);
 	if (err) {
-		// log(ERROR, "sleep on wait_connect failed.");
+		log(ERROR, "sleep on wait_connect failed.");
 		return err;
 	}
 
@@ -306,7 +306,7 @@ int tcp_sock_connect(struct tcp_sock *tsk, struct sock_addr *skaddr)
 int tcp_sock_listen(struct tcp_sock *tsk, int backlog)
 {
 	// fprintf(stdout, "TODO: implement %s please.\n", __FUNCTION__);
-	// log(DEBUG, "listening on port %hu.", tsk->sk_sport);
+	log(DEBUG, "listening on port %hu.", tsk->sk_sport);
 	tsk->backlog = backlog;
 	tcp_set_state(tsk, TCP_LISTEN);
 	return tcp_hash(tsk);
@@ -316,7 +316,7 @@ int tcp_sock_listen(struct tcp_sock *tsk, int backlog)
 inline int tcp_sock_accept_queue_full(struct tcp_sock *tsk)
 {
 	if (tsk->accept_backlog >= tsk->backlog) {
-		// log(ERROR, "tcp accept queue (%d) is full.", tsk->accept_backlog);
+		log(ERROR, "tcp accept queue (%d) is full.", tsk->accept_backlog);
 		return 1;
 	}
 
@@ -359,13 +359,13 @@ struct tcp_sock *tcp_sock_accept(struct tcp_sock *tsk)
 void tcp_sock_close(struct tcp_sock *tsk)
 {
 	// fprintf(stdout, "TODO: implement %s please.\n", __FUNCTION__);
-	// log(DEBUG, "close tcp sock: "IP_FMT":%hu -> "IP_FMT":%hu, state: %s.", \
-			HOST_IP_FMT_STR(tsk->sk_sip), tsk->sk_sport, \
-			HOST_IP_FMT_STR(tsk->sk_dip), tsk->sk_dport, \
-			tcp_state_str[tsk->state]);
 
+	log(DEBUG, "close tcp sock: "IP_FMT":%hu -> "IP_FMT":%hu, state: %s.",
+			HOST_IP_FMT_STR(tsk->sk_sip), tsk->sk_sport,
+			HOST_IP_FMT_STR(tsk->sk_dip), tsk->sk_dport,
+			tcp_state_str[tsk->state]);
 	switch(tsk->state) {
-		case TCP_SYN_SENT:
+		case TCP_SYN_RECV:
 			tcp_set_state(tsk, TCP_FIN_WAIT_1);
 			tcp_send_control_packet(tsk, TCP_FIN | TCP_ACK);
 			break;
@@ -394,7 +394,7 @@ int tcp_sock_read(struct tcp_sock *tsk, char *buf, int len)
 {
 	pthread_mutex_lock(&tsk->rcv_buf_lock);
 	while (ring_buffer_empty(tsk->rcv_buf)) {
-		if (tsk->state == TCP_CLOSE_WAIT || tsk->state == TCP_LAST_ACK || tsk->state == TCP_CLOSED) {
+		if (tsk->state == TCP_CLOSED || tsk->state == TCP_LAST_ACK || tsk->state == TCP_CLOSE_WAIT) {
 			pthread_mutex_unlock(&tsk->rcv_buf_lock);
 			return 0;
 		}
@@ -422,7 +422,7 @@ int tcp_send_data(struct tcp_sock *tsk, char *buf, int len)
 	memcpy(payload, buf, len);
 
 	while (tsk->snd_wnd < len) {
-		// log(DEBUG, "wait for sending window.");
+		log(DEBUG, "wait for sending window.");
 		tsk->snd_wnd = 0;
 		sleep_on(tsk->wait_send);
 	}

@@ -37,21 +37,20 @@ static inline int is_tcp_seq_valid(struct tcp_sock *tsk, struct tcp_cb *cb)
 		return 1;
 	}
 	else {
-		// log(ERROR, "received packet with invalid seq, drop it.");
+		log(ERROR, "received packet with invalid seq, drop it.");
 		return 0;
 	}
 }
 
 // handle the recv of the incoming TCP packet
-// TODO: finish the function
 int handle_tcp_recv(struct tcp_sock *tsk, struct tcp_cb *cb)
 {
 	if (cb->pl_len <= 0)
 		return 0;
 	
 	pthread_mutex_lock(&tsk->rcv_buf_lock);
-	if (ring_buffer_free(tsk->rcv_buf) < cb->pl_len) {
-		// log(ERROR, "no enough space in rcv_buf, drop the packet.");
+	if (cb->pl_len > ring_buffer_free(tsk->rcv_buf)) {
+		log(ERROR, "no enough space in rcv_buf, drop the packet.");
 		pthread_mutex_unlock(&tsk->rcv_buf_lock);
 		return 0;
 	}
@@ -67,9 +66,9 @@ void tcp_process(struct tcp_sock *tsk, struct tcp_cb *cb, char *packet)
 {
 	// fprintf(stdout, "TODO: implement %s please.\n", __FUNCTION__);
 	if (!tsk) {
-		// log(ERROR, "no tcp sock to process packet.\n");
+	    log(ERROR, "no tcp sock to process packet.\n");
 		tcp_send_reset(cb);
-		return;
+        return;
 	}
 	if (cb->flags & TCP_RST) {
 		tcp_set_state(tsk, TCP_CLOSED);
@@ -95,13 +94,13 @@ void tcp_process(struct tcp_sock *tsk, struct tcp_cb *cb, char *packet)
 				tcp_set_state(ctsk, TCP_SYN_RECV);
 				tcp_hash(ctsk);
 				init_list_head(&ctsk->bind_hash_list);
-				// log(DEBUG, "child "IP_FMT":%hu join the listen queue of parent "IP_FMT":%hu", HOST_IP_FMT_STR(ctsk->sk_sip), ntohs(ctsk->sk_sport), HOST_IP_FMT_STR(tsk->sk_sip), ntohs(tsk->sk_sport));
+				log(DEBUG, "child "IP_FMT":%hu join the listen queue of parent "IP_FMT":%hu", HOST_IP_FMT_STR(ctsk->sk_sip), ntohs(ctsk->sk_sport), HOST_IP_FMT_STR(tsk->sk_sip), ntohs(tsk->sk_sport));
 				list_add_tail(&ctsk->list, &tsk->listen_queue);
 
 				tcp_send_control_packet(ctsk, TCP_SYN | TCP_ACK);
 			}
 			else
-				// log(ERROR, "received packet is not SYN but current state is LISTEN, drop it.");
+				log(ERROR, "received packet is not SYN but current state is LISTEN, drop it.");
 			break;
 
 		case TCP_SYN_SENT:
@@ -116,10 +115,10 @@ void tcp_process(struct tcp_sock *tsk, struct tcp_cb *cb, char *packet)
 			else if (cb->flags == TCP_SYN) {
 				tsk->rcv_nxt = cb->seq_end;
 				tcp_set_state(tsk, TCP_SYN_RECV);
-				tcp_send_control_packet(tsk, TCP_ACK | TCP_SYN);
+				tcp_send_control_packet(tsk, TCP_SYN | TCP_ACK);
 			}
 			else
-				// log(ERROR, "received packet is not SYN or SYN_ACK but current state is SYN_SENT, drop it.");
+				log(ERROR, "received packet is not SYN or SYN_ACK but current state is SYN_SENT, drop it.");
 			break;
 
 		case TCP_SYN_RECV:
@@ -131,13 +130,7 @@ void tcp_process(struct tcp_sock *tsk, struct tcp_cb *cb, char *packet)
 				tsk->snd_una = cb->ack;
 
 				if (tsk->parent) {
-					if (!tcp_sock_accept_queue_full(tsk->parent)) {
-						tcp_set_state(tsk, TCP_ESTABLISHED);
-						tcp_sock_accept_enqueue(tsk);
-						wake_up(tsk->parent->wait_accept);
-					}
-					else {
-						// log(ERROR, "accept queue is full, drop this connection.");
+					if (tcp_sock_accept_queue_full(tsk->parent)) {
 						tcp_set_state(tsk, TCP_CLOSED);
 						tcp_send_control_packet(tsk, TCP_RST);
 						tcp_unhash(tsk);
@@ -145,13 +138,19 @@ void tcp_process(struct tcp_sock *tsk, struct tcp_cb *cb, char *packet)
 
 						list_delete_entry(&tsk->list);
 						free_tcp_sock(tsk);
+						log(ERROR, "accept queue is full, drop this connection.");
+					} 
+					else {
+						tcp_set_state(tsk, TCP_ESTABLISHED);
+						tcp_sock_accept_enqueue(tsk);
+						wake_up(tsk->parent->wait_accept);
 					}
 				}
-				else;
-					// log(ERROR, "no parent tcp sock to accept child connection.");
+				else
+					log(ERROR, "no parent tcp sock to accept child connection.");
 			}
 			else
-				// log(ERROR, "received packet is not ACK but current state is SYN_RECV, drop it.");
+				log(ERROR, "received packet is not ACK but current state is SYN_RECV, drop it.");
 			break;
 
 		case TCP_ESTABLISHED:
@@ -175,7 +174,7 @@ void tcp_process(struct tcp_sock *tsk, struct tcp_cb *cb, char *packet)
 				}
 			}
 			break;
-	
+		
 		case TCP_FIN_WAIT_1:
 			if (!is_tcp_seq_valid(tsk, cb))
 				return;
@@ -215,11 +214,11 @@ void tcp_process(struct tcp_sock *tsk, struct tcp_cb *cb, char *packet)
 			break;
 
 		case TCP_TIME_WAIT:
-			// log(DEBUG, "received packet in TCP_TIME_WAIT state");
+			log(DEBUG, "received packet in TCP_TIME_WAIT state");
 			break;
 
 		case TCP_CLOSE_WAIT:
-			// log(DEBUG, "received packet in TCP_CLOSE_WAIT state");
+			log(DEBUG, "received packet in TCP_CLOSE_WAIT state");
 			break;
 
 		case TCP_LAST_ACK:
@@ -238,14 +237,14 @@ void tcp_process(struct tcp_sock *tsk, struct tcp_cb *cb, char *packet)
 			}
 			break;
 
-		case TCP_CLOSED:
-			// log(DEBUG, "the tcp sock is already closed.");
+		case(TCP_CLOSED):
+			log(DEBUG, "the tcp sock is already closed.");
 			tcp_unhash(tsk);
 			tcp_bind_unhash(tsk);
 			break;
 
 		default:
-			// log(ERROR, "unknown tcp state %d", tsk->state);
+			log(ERROR, "unknown tcp state %d", tsk->state);
 			break;
 	}
 }
