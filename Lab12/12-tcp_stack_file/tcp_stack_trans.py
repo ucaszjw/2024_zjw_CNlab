@@ -1,4 +1,4 @@
-#!/usr/bin/python
+# !/usr/bin/python
 
 import os
 import sys
@@ -7,7 +7,7 @@ import socket
 from time import sleep
 
 
-data = string.digits + string.lowercase + string.uppercase
+data = string.digits + string.ascii_lowercase + string.ascii_uppercase
 
 def server(port, filename):
     s = socket.socket()
@@ -45,8 +45,7 @@ def client(ip, port, filename):
                 s.send(data)
             else:
                 break
-            sleep(0.1)
-  
+ 
     s.close()
 
 if __name__ == '__main__':
