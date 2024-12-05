@@ -1123,4 +1123,112 @@
 
 \section{实验结果}
 
+\subsection{短消息收发}
+
+使用自己的可执行文件和实验提供的标准分别进行测试。
+
+自己的可执行文件分别作为服务器端和客户端：
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=.75\textwidth]{my_server_my_client_echo_h1.png}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=.75\textwidth]{my_server_my_client_echo_h2.png}
+\end{figure}
+
+自己的可执行文件作为服务器端，实验提供的标准作为客户端：
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=.75\textwidth]{my_server_std_client_echo_h1.png}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=.75\textwidth]{my_server_std_client_echo_h2.png}
+\end{figure}
+
+实验提供的标准作为服务器端，自己的可执行文件作为客户端：
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=.75\textwidth]{std_server_my_client_echo_h1.png}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=.75\textwidth]{std_server_my_client_echo_h2.png}
+\end{figure}
+
+可以看出，客户端均正确接收到了服务器端echo的数据，且状态转移正确。
+
+\subsection{大文件传输}
+
+使用自己的可执行文件和实验提供的标准分别进行测试。
+
+自己的可执行文件分别作为服务器端和客户端：
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=.75\textwidth]{my_server_my_client_file_h1.png}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=.75\textwidth]{my_server_my_client_file_h2.png}
+\end{figure}
+
+用\texttt{md5sum}检验结果:
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=.75\textwidth]{my_server_my_client_file_md5sum.png}
+\end{figure}
+
+自己的可执行文件作为服务器端，实验提供的标准作为客户端：
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=.75\textwidth]{my_server_std_client_file_h1.png}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=.75\textwidth]{my_server_std_client_file_h2.png}
+\end{figure}
+
+用\texttt{md5sum}检验结果:
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=.75\textwidth]{my_server_std_client_file_md5sum.png}
+\end{figure}
+
+实验提供的标准作为服务器端，自己的可执行文件作为客户端：
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=.75\textwidth]{std_server_my_client_file_h1.png}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=.75\textwidth]{std_server_my_client_file_h2.png}
+\end{figure}
+
+用\texttt{md5sum}检验结果:
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=.75\textwidth]{std_server_my_client_file_md5sum.png}
+\end{figure}
+
+可以看出，因为\texttt{md5sum}检验结果一致，所以大文件传输也是正确的， 且状态转移正确。
+
+\section{实验总结}
+
+本次实验主要是实现TCP协议栈的应用层，包括TCP连接的建立、数据传输、连接的关闭等。通过本次实验，我对TCP协议栈的实现有了更深入的了解，对TCP协议的状态机有了更深刻的认识。同时，通过本次实验，我也学会了如何使用多线程来实现TCP连接的并发处理，以及如何使用文件I/O来实现大文件的传输。
 \end{document}
