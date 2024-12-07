@@ -37,8 +37,9 @@ void init_tcp_stack()
 	for (int i = 0; i < TCP_HASH_SIZE; i++)
 		init_list_head(&tcp_bind_sock_table[i]);
 
-	pthread_t timer;
-	pthread_create(&timer, NULL, tcp_timer_thread, NULL);
+	pthread_t timer_wait, timer_retrans;
+	pthread_create(&timer_wait, NULL, tcp_timer_thread, NULL);
+	pthread_create(&timer_retrans, NULL, tcp_retrans_timer_thread, NULL);
 }
 
 // allocate tcp sock, and initialize all the variables that can be determined
@@ -101,7 +102,7 @@ void free_tcp_sock(struct tcp_sock *tsk)
 		free_wait_struct(tsk->wait_recv);
 		free_wait_struct(tsk->wait_send);
 		free(tsk);
-	}
+	} 
 }
 
 // lookup tcp sock in established_table with key (saddr, daddr, sport, dport)
@@ -323,6 +324,7 @@ int tcp_sock_listen(struct tcp_sock *tsk, int backlog)
 	// fprintf(stdout, "TODO: implement %s please.\n", __FUNCTION__);
 	log(DEBUG, "listening on port %hu.", tsk->sk_sport);
 	tsk->backlog = backlog;
+	tcp_set_state(tsk, TCP_LISTEN);
 	int err = tcp_hash(tsk);
 	if (err) {
 		log(ERROR, "tcp sock hash failed.");
@@ -369,7 +371,7 @@ struct tcp_sock *tcp_sock_accept(struct tcp_sock *tsk)
 	// fprintf(stdout, "TODO: implement %s please.\n", __FUNCTION__);
 	while (list_empty(&tsk->accept_queue))
 		sleep_on(tsk->wait_accept);
-	
+
 	return tcp_sock_accept_dequeue(tsk);
 }
 
@@ -454,49 +456,49 @@ int tcp_sock_write(struct tcp_sock *tsk, char *buf, int len)
 
 void tcp_send_buf_add_packet(struct tcp_sock *tsk, char *packet, int len)
 {
-	send_buffer_entry_t *send_buffer_entry = (send_buffer_entry_t *)malloc(sizeof(send_buffer_entry_t));
-	memset(send_buffer_entry, 0, sizeof(send_buffer_entry_t));
-	send_buffer_entry->packet = (char *)malloc(len);
-	send_buffer_entry->len = len;
-	memcpy(send_buffer_entry->packet, packet, len);
+    send_buffer_entry_t *send_buffer_entry = (send_buffer_entry_t *)malloc(sizeof(send_buffer_entry_t));
+    memset(send_buffer_entry, 0, sizeof(send_buffer_entry_t));
+    send_buffer_entry->packet = (char *)malloc(len);
+    send_buffer_entry->len = len;
+    memcpy(send_buffer_entry->packet, packet, len);
 
-	init_list_head(&send_buffer_entry->list);
-	list_add_tail(&send_buffer_entry->list, &tsk->send_buf);
+    init_list_head(&send_buffer_entry->list);
+    list_add_tail(&send_buffer_entry->list, &tsk->send_buf);
 }
 
 void tcp_update_send_buf(struct tcp_sock *tsk, u32 ack)
 {
-	send_buffer_entry_t *send_buffer_entry, *send_buffer_entry_q;
-	list_for_each_entry_safe(send_buffer_entry, send_buffer_entry_q, &tsk->send_buf, list) {
-		struct tcphdr *tcp = packet_to_tcp_hdr(send_buffer_entry->packet);
-		u32 seq = ntohl(tcp->seq);
-		
-		if (less_than_32b(seq, ack)) {
-			list_delete_entry(&send_buffer_entry->list);
-			free(send_buffer_entry->packet);
-			free(send_buffer_entry);
-		}
-	}
+    send_buffer_entry_t *send_buffer_entry, *send_buffer_entry_q;
+    list_for_each_entry_safe(send_buffer_entry, send_buffer_entry_q, &tsk->send_buf, list) {
+        struct tcphdr *tcp = packet_to_tcp_hdr(send_buffer_entry->packet);
+        u32 seq = ntohl(tcp->seq);
+
+        if (less_than_32b(seq, ack)) {
+            list_delete_entry(&send_buffer_entry->list);
+            free(send_buffer_entry->packet);
+            free(send_buffer_entry);
+        }
+    }
 }
 
 int tcp_retrans_send_buf(struct tcp_sock *tsk)
 {
-	if (list_empty(&tsk->send_buf)) {
+    if (list_empty(&tsk->send_buf)) {
 		log(ERROR, "send_buf is empty\n");
 		pthread_mutex_unlock(&tsk->send_buf_lock);
-		return 0;
-	}
+        return 0;
+    }
 
 	send_buffer_entry_t *send_buffer_entry = list_entry(tsk->send_buf.next, send_buffer_entry_t, list);
 	char *packet = (char *)malloc(send_buffer_entry->len);
 
 	memcpy(packet, send_buffer_entry->packet, send_buffer_entry->len);
-	struct tcphdr *tcp = packet_to_tcp_hdr(packet);
+    struct tcphdr *tcp = packet_to_tcp_hdr(packet);
 	struct iphdr *ip = packet_to_ip_hdr(packet);
 
-	tcp->ack = htonl(tsk->rcv_nxt);
-	tcp->checksum = tcp_checksum(ip, tcp);
-	ip->checksum = ip_checksum(ip);
+    tcp->ack = htonl(tsk->rcv_nxt);
+    tcp->checksum = tcp_checksum(ip, tcp);
+    ip->checksum = ip_checksum(ip);
 
 	int tcp_len = ntohs(ip->tot_len) - IP_BASE_HDR_SIZE - TCP_BASE_HDR_SIZE;
 	tsk->snd_wnd -= tcp_len;
@@ -511,7 +513,7 @@ int tcp_recv_ofo_buf_add_packet(struct tcp_sock *tsk, struct tcp_cb *cb)
 {
 	if (cb->pl_len <= 0)
 		return 0;
-	
+
 	recv_ofo_buf_entry_t *recv_ofo_buf_entry = (recv_ofo_buf_entry_t *)malloc(sizeof(recv_ofo_buf_entry_t));
 	recv_ofo_buf_entry->seq = cb->seq;
 	recv_ofo_buf_entry->seq_end = cb->seq_end;
@@ -521,43 +523,43 @@ int tcp_recv_ofo_buf_add_packet(struct tcp_sock *tsk, struct tcp_cb *cb)
 
 	init_list_head(&recv_ofo_buf_entry->list);
 
-	recv_ofo_buf_entry_t *entry, *entry_q;
+    recv_ofo_buf_entry_t *entry, *entry_q;
 	list_for_each_entry_safe(entry, entry_q, &tsk->rcv_ofo_buf, list) {
 		if (recv_ofo_buf_entry->seq == entry->seq)
 			return 1;
 		if (less_than_32b(recv_ofo_buf_entry->seq, entry->seq)) {
 			list_add_tail(&recv_ofo_buf_entry->list, &entry->list);
-			return 1;
-		}
-	}
+            return 1;
+        }
+    }
 	list_add_tail(&recv_ofo_buf_entry->list, &tsk->rcv_ofo_buf);
 	return 1;
 }
 
 int tcp_move_recv_ofo_buf(struct tcp_sock *tsk)
 {
-	recv_ofo_buf_entry_t *entry, *entry_q;
-	list_for_each_entry_safe(entry, entry_q, &tsk->rcv_ofo_buf, list) {
-		if (tsk->rcv_nxt == entry->seq) {
+    recv_ofo_buf_entry_t *entry, *entry_q;
+    list_for_each_entry_safe(entry, entry_q, &tsk->rcv_ofo_buf, list) {
+        if (tsk->rcv_nxt == entry->seq) {
 			while (ring_buffer_free(tsk->rcv_buf) < entry->len)
-				sleep_on(tsk->wait_recv);
-			pthread_mutex_lock(&tsk->rcv_buf_lock);
-			write_ring_buffer(tsk->rcv_buf, entry->data, entry->len);
-			tsk->rcv_wnd -= entry->len;
-			pthread_mutex_unlock(&tsk->rcv_buf_lock);
-			wake_up(tsk->wait_recv);
+                sleep_on(tsk->wait_recv);
+            pthread_mutex_lock(&tsk->rcv_buf_lock);
+            write_ring_buffer(tsk->rcv_buf, entry->data, entry->len);
+            tsk->rcv_wnd -= entry->len;
+            pthread_mutex_unlock(&tsk->rcv_buf_lock);
+            wake_up(tsk->wait_recv);
 
-			tsk->rcv_nxt = entry->seq_end;
-			list_delete_entry(&entry->list);
-			free(entry->data);
-			free(entry);
-		}
+            tsk->rcv_nxt = entry->seq_end;
+            list_delete_entry(&entry->list);
+            free(entry->data);
+            free(entry);
+        }
 		else if (less_than_32b(tsk->rcv_nxt, entry->seq))
 			continue;
 		else {
 			log(ERROR, "rcv_nxt: %u, seq: %u\n", tsk->rcv_nxt, entry->seq);
-			return 0;
-		}
-	}
-	return 1;
+            return 0;
+        }
+    }
+    return 1;
 }

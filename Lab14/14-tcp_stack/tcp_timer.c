@@ -11,7 +11,7 @@
 #define TIMER_TYPE_RETRANS 1
 
 static struct list_head timer_list;
-static struct list_head retrans_timer_list;
+struct list_head retrans_timer_list;
 
 static pthread_mutex_t timer_list_lock = PTHREAD_MUTEX_INITIALIZER;
 static pthread_mutex_t retrans_timer_list_lock = PTHREAD_MUTEX_INITIALIZER;
@@ -36,9 +36,12 @@ void tcp_scan_timer_list()
 					tcp_bind_unhash(tsk);
 					list_delete_entry(&timer_p->list);
 					free_tcp_sock(tsk);
+
+					// just leave the closed sock in accept_queue/user
 				}
 				else if (timer_p->type == TIMER_TYPE_RETRANS)
-					tsk = retranstimer_to_tcp_sock(timer_p);
+					log(ERROR, "wait timer list entry type error\n");
+				
 			}
 		}
 	}
@@ -80,25 +83,14 @@ void tcp_set_retrans_timer (struct tcp_sock *tsk)
 		tsk->retrans_timer.timeout = TCP_RETRANS_INTERVAL_INITIAL;
 		return;
 	}
-
-	tsk->retrans_timer.enable = 1;
 	tsk->retrans_timer.type = TIMER_TYPE_RETRANS;
+	tsk->retrans_timer.enable = 1;
 	tsk->retrans_timer.timeout = TCP_RETRANS_INTERVAL_INITIAL;
+	tsk->retrans_timer.retrans_time = 0;
 
 	pthread_mutex_lock(&retrans_timer_list_lock);
 	list_add_tail(&tsk->retrans_timer.list, &retrans_timer_list);
 	pthread_mutex_unlock(&retrans_timer_list_lock);
-}
-
-void tcp_unset_retrans_timer (struct tcp_sock *tsk)
-{
-	if (!list_empty(&tsk->retrans_timer.list)) {
-		tsk->retrans_timer.enable = 0;
-		list_delete_entry(&tsk->retrans_timer.list);
-		wake_up(tsk->wait_send);
-	}
-	else
-		log(ERROR, "unset retrans timer failed, the timer is not in the list");
 }
 
 void tcp_update_retrans_timer(struct tcp_sock *tsk)
@@ -110,14 +102,26 @@ void tcp_update_retrans_timer(struct tcp_sock *tsk)
 	}
 }
 
-void tcp_scan_retrans_timer_list()
+void tcp_unset_retrans_timer(struct tcp_sock *tsk)
+{
+	if (!list_empty(&tsk->retrans_timer.list)) {
+		tsk->retrans_timer.enable = 0;
+		list_delete_entry(&tsk->retrans_timer.list);
+		wake_up(tsk->wait_send);
+	}
+	else {
+		log(ERROR, "unset an empty retrans timer\n");
+	}
+}
+
+void tcp_scan_retrans_timer_list(void)
 {
 	struct tcp_sock *tsk;
 	struct tcp_timer *timer_entry, *timer_q;
 
 	pthread_mutex_lock(&retrans_timer_list_lock);
 	list_for_each_entry_safe(timer_entry, timer_q, &retrans_timer_list, list) {
-		timer_entry->timeout -= TCP_TIMER_SCAN_INTERVAL;
+		timer_entry->timeout -= TCP_RETRANS_SCAN_INTERVAL;
 		tsk = retranstimer_to_tcp_sock(timer_entry);
 		if (timer_entry->timeout <= 0) {
 			if (timer_entry->retrans_time >= MAX_RETRANS_NUM && tsk->state != TCP_CLOSED) {
@@ -128,7 +132,7 @@ void tcp_scan_retrans_timer_list()
 				wait_exit(tsk->wait_accept);
 				wait_exit(tsk->wait_recv);
 				wait_exit(tsk->wait_send);
-
+				
 				tcp_set_state(tsk, TCP_CLOSED);
 				tcp_send_control_packet(tsk, TCP_RST);
 			}
@@ -147,7 +151,7 @@ void *tcp_retrans_timer_thread(void *arg)
 {
 	init_list_head(&retrans_timer_list);
 	while (1) {
-		usleep(TCP_TIMER_SCAN_INTERVAL);
+		usleep(TCP_RETRANS_SCAN_INTERVAL);
 		tcp_scan_retrans_timer_list();
 	}
 

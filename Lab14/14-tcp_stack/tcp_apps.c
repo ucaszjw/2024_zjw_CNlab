@@ -4,6 +4,16 @@
 
 #include <stdlib.h>
 #include <unistd.h>
+#include <sys/time.h>
+
+//char filename[100];
+
+// return the interval in us
+long get_interval(struct timeval tv_start,struct timeval tv_end){
+    long start_us = tv_start.tv_sec * 1000000 + tv_start.tv_usec;
+    long end_us   = tv_end.tv_sec   * 1000000 + tv_end.tv_usec;
+    return end_us - start_us;
+}
 
 // tcp server application, listens to port (specified by arg) and serves only one
 // connection request
@@ -124,6 +134,8 @@ void *tcp_server_file(void *arg)
 	}
 	log(DEBUG, "open file server-output.dat success.");
 
+	struct timeval tv_start, tv_end;
+
 	u16 port = *(u16 *)arg;
 	struct sock_addr skaddr;
 	struct tcp_sock *tsk = alloc_tcp_sock();
@@ -142,6 +154,7 @@ void *tcp_server_file(void *arg)
 
 	struct tcp_sock *csk = tcp_sock_accept(tsk);
 	log(DEBUG, "accept a connection.");
+	gettimeofday(&tv_start,NULL);
 
 	char dbuf[20030];
 	int dlen = 0;
@@ -155,10 +168,15 @@ void *tcp_server_file(void *arg)
 		}
 	}
 
+	gettimeofday(&tv_end,NULL);
+	long time_res = get_interval(tv_start,tv_end);
+	time_res /= 1000000;
+	fprintf(stderr, "used time: %ld s\n", time_res);
+
 	log(DEBUG, "close this connection.");
 	fclose(fp);
 	tcp_sock_close(csk);
-
+	
 	return NULL;
 }
 

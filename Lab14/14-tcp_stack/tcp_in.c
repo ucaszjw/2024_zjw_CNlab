@@ -47,7 +47,7 @@ int handle_tcp_recv(struct tcp_sock *tsk, struct tcp_cb *cb)
 {
 	if (cb->pl_len <= 0)
 		return 0;
-	
+
 	pthread_mutex_lock(&tsk->rcv_buf_lock);
 	while (ring_buffer_full(tsk->rcv_buf)) {
 		pthread_mutex_unlock(&tsk->rcv_buf_lock);
@@ -142,7 +142,7 @@ void tcp_process(struct tcp_sock *tsk, struct tcp_cb *cb, char *packet)
 					return;
 				tsk->rcv_nxt = cb->seq_end;
 				tcp_update_window_safe(tsk, cb);
-				tsk->snd_una = cb->ack;
+				tsk->snd_una = greater_than_32b(cb->ack, tsk->snd_una) ? cb->ack : tsk->snd_una;
 
 				if (tsk->parent) {
 					if (tcp_sock_accept_queue_full(tsk->parent)) {
@@ -190,14 +190,14 @@ void tcp_process(struct tcp_sock *tsk, struct tcp_cb *cb, char *packet)
 				tcp_update_retrans_timer(tsk);
 				if (tsk->retrans_timer.enable)
 					log(ERROR, "receive no ack packet in established state\n");
-				
+
 				tcp_set_state(tsk, TCP_CLOSE_WAIT);
 				handle_tcp_recv(tsk, cb);
 
 				tsk->rcv_nxt = cb->seq_end;
 				tcp_send_control_packet(tsk, TCP_ACK);
 				wake_up(tsk->wait_recv);
-			}
+			} 
 			else {
 				if (cb->pl_len != 0) 
 					handle_tcp_recv(tsk, cb);
@@ -264,7 +264,7 @@ void tcp_process(struct tcp_sock *tsk, struct tcp_cb *cb, char *packet)
 			if (cb->flags & TCP_ACK) {
 				tcp_update_window_safe(tsk, cb);
 				tsk->snd_una = cb->ack;
-
+				
 				tcp_set_state(tsk, TCP_TIME_WAIT);
 				tcp_set_timewait_timer(tsk);
 			}
@@ -291,8 +291,15 @@ void tcp_process(struct tcp_sock *tsk, struct tcp_cb *cb, char *packet)
 				tcp_update_send_buf(tsk, cb->ack);
 				tcp_unset_retrans_timer(tsk);
 				tcp_set_state(tsk, TCP_CLOSED);
+				tsk->rcv_nxt = cb->seq;
+				tsk->snd_una = cb->ack;
+
+				tcp_set_state(tsk, TCP_CLOSED);
+
 				tcp_unhash(tsk);
 				tcp_bind_unhash(tsk);
+
+				free_tcp_sock(tsk);
 			}
 			break;
 
