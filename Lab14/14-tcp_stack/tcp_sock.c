@@ -19,9 +19,7 @@ struct tcp_hash_table tcp_sock_table;
 
 inline void tcp_set_state(struct tcp_sock *tsk, int state)
 {
-	log(DEBUG, IP_FMT":%hu switch state, from %s to %s.",
-			HOST_IP_FMT_STR(tsk->sk_sip), tsk->sk_sport,
-			tcp_state_str[tsk->state], tcp_state_str[state]);
+	log(DEBUG, IP_FMT":%hu switch state, from %s to %s.", HOST_IP_FMT_STR(tsk->sk_sip), tsk->sk_sport, tcp_state_str[tsk->state], tcp_state_str[state]);
 	tsk->state = state;
 }
 
@@ -73,9 +71,7 @@ struct tcp_sock *alloc_tcp_sock()
 	tsk->timewait.enable = 0;
 	tsk->retrans_timer.enable = 0;
 
-	log(DEBUG, "alloc tcp sock: "IP_FMT":%hu -> "IP_FMT":%hu.",
-			HOST_IP_FMT_STR(tsk->sk_sip), tsk->sk_sport,
-			HOST_IP_FMT_STR(tsk->sk_dip), tsk->sk_dport);
+	log(DEBUG, "alloc tcp sock: "IP_FMT":%hu -> "IP_FMT":%hu.", HOST_IP_FMT_STR(tsk->sk_sip), tsk->sk_sport, HOST_IP_FMT_STR(tsk->sk_dip), tsk->sk_dport);
 
 	tsk->ref_cnt++;
 
@@ -93,9 +89,7 @@ void free_tcp_sock(struct tcp_sock *tsk)
 	// fprintf(stdout, "TODO: implement %s please.\n", __FUNCTION__);
 	tsk->ref_cnt -= 1;
 	if (tsk->ref_cnt == 0) {
-		log(DEBUG, "free tcp sock: "IP_FMT":%hu -> "IP_FMT":%hu.",
-				HOST_IP_FMT_STR(tsk->sk_sip), tsk->sk_sport,
-				HOST_IP_FMT_STR(tsk->sk_dip), tsk->sk_dport);
+		log(DEBUG, "free tcp sock: "IP_FMT":%hu -> "IP_FMT":%hu.", HOST_IP_FMT_STR(tsk->sk_sip), tsk->sk_sport, HOST_IP_FMT_STR(tsk->sk_dip), tsk->sk_dport);
 		free_ring_buffer(tsk->rcv_buf);
 		free_wait_struct(tsk->wait_connect);
 		free_wait_struct(tsk->wait_accept);
@@ -381,10 +375,7 @@ void tcp_sock_close(struct tcp_sock *tsk)
 {
 	// fprintf(stdout, "TODO: implement %s please.\n", __FUNCTION__);
 
-	log(DEBUG, "close tcp sock: "IP_FMT":%hu -> "IP_FMT":%hu, state: %s.",
-			HOST_IP_FMT_STR(tsk->sk_sip), tsk->sk_sport,
-			HOST_IP_FMT_STR(tsk->sk_dip), tsk->sk_dport,
-			tcp_state_str[tsk->state]);
+	log(DEBUG, "close tcp sock: "IP_FMT":%hu -> "IP_FMT":%hu, state: %s.", HOST_IP_FMT_STR(tsk->sk_sip), tsk->sk_sport, HOST_IP_FMT_STR(tsk->sk_dip), tsk->sk_dport, tcp_state_str[tsk->state]);
 	switch(tsk->state) {
 		case TCP_SYN_RECV:
 			tcp_set_state(tsk, TCP_FIN_WAIT_1);
@@ -557,7 +548,7 @@ int tcp_move_recv_ofo_buf(struct tcp_sock *tsk)
 		else if (less_than_32b(tsk->rcv_nxt, entry->seq))
 			continue;
 		else {
-			log(ERROR, "rcv_nxt: %u, seq: %u\n", tsk->rcv_nxt, entry->seq);
+            log(ERROR, "rcv_nxt is more than seq, rcv_nxt: %d, seq: %d\n", tsk->rcv_nxt, entry->seq);
             return 0;
         }
     }

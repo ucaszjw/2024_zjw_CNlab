@@ -26,20 +26,20 @@ void *tcp_server(void *arg)
 	addr.ip = htonl(0);
 	addr.port = port;
 	if (tcp_sock_bind(tsk, &addr) < 0) {
-		// log(ERROR, "tcp_sock bind to port %hu failed", ntohs(port));
+		log(ERROR, "tcp_sock bind to port %hu failed", ntohs(port));
 		exit(1);
 	}
 
 	if (tcp_sock_listen(tsk, 3) < 0) {
-		// log(ERROR, "tcp_sock listen failed");
+		log(ERROR, "tcp_sock listen failed");
 		exit(1);
 	}
 
-	// log(DEBUG, "listen to port %hu.", ntohs(port));
+	log(DEBUG, "listen to port %hu.", ntohs(port));
 
 	struct tcp_sock *csk = tcp_sock_accept(tsk);
 
-	// log(DEBUG, "accept a connection.");
+	log(DEBUG, "accept a connection.");
 
 	// sleep(5);
 	char rbuf[1001], wbuf[1024];
@@ -47,19 +47,19 @@ void *tcp_server(void *arg)
 	while (1) {
 		rlen = tcp_sock_read(csk, rbuf, 1000);
 		if (rlen == 0) {
-			// log(DEBUG, "tcp_sock_read return 0, the peer has closed.");
+			log(DEBUG, "tcp_sock_read return 0, the peer has closed.");
 			break;
 		} 
 		else if (rlen > 0) {
 			rbuf[rlen] = '\0';
 			sprintf(wbuf, "server echoes: %s", rbuf);
 			if (tcp_sock_write(csk, wbuf, strlen(wbuf)) < 0) {
-				// log(ERROR, "tcp_sock_write failed.");
+				log(ERROR, "tcp_sock_write failed.");
 				exit(1);
 			}
 		}
 		else {
-			// log(ERROR, "tcp_sock_read return %d, this is an error.", rlen);
+			log(ERROR, "tcp_sock_read return %d, this is an error.", rlen);
 			exit(1);
 		}
 	}
