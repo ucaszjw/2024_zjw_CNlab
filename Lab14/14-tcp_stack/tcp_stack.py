@@ -1,10 +1,11 @@
-#!/usr/bin/python
+#!/usr/bin/python2
 
 import sys
 import string
 import socket
 from time import sleep
 
+data = string.digits + string.lowercase + string.uppercase
 
 def server(port):
     s = socket.socket()
@@ -14,8 +15,16 @@ def server(port):
     s.listen(3)
     
     cs, addr = s.accept()
+    print addr
     
-    sleep(5)
+    while True:
+        data = cs.recv(1000)
+        print(type(data))
+        if data:
+            data = 'server echoes: ' + data
+            cs.send(data)
+        else:
+            break
     
     s.close()
 
@@ -24,7 +33,11 @@ def client(ip, port):
     s = socket.socket()
     s.connect((ip, int(port)))
     
-    sleep(1)
+    for i in range(10):
+        new_data = data[i:] + data[:i+1]
+        s.send(new_data)
+        print s.recv(1000)
+        sleep(1)
     
     s.close()
 

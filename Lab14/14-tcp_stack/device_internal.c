@@ -36,7 +36,7 @@ void iface_send_packet(iface_info_t *iface, const char *packet, int len)
 		perror("Send raw packet failed");
 	}
 
-	free((char *)packet);
+	//free((char *)packet);
 }
 
 // open the interface to read all the necessary information

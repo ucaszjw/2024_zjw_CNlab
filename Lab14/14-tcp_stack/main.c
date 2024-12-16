@@ -96,8 +96,7 @@ static void run_application(const char *basename, char **args, int n)
 			usage_and_exit(basename);
 
 		u16 port = htons(atoi(args[1]));
-		// pthread_create(&thread, NULL, tcp_server, &port);
-		pthread_create(&thread, NULL, tcp_server_file, &port);
+		pthread_create(&thread, NULL, tcp_server, &port);
 	}
 	else if (strcmp(args[0], "client") == 0) {
 		if (n != 3)
@@ -106,7 +105,33 @@ static void run_application(const char *basename, char **args, int n)
 		struct sock_addr skaddr;
 		skaddr.ip = inet_addr(args[1]);
 		skaddr.port = htons(atoi(args[2]));
-		// pthread_create(&thread, NULL, tcp_client, &skaddr);
+		pthread_create(&thread, NULL, tcp_client, &skaddr);
+	}
+	else {
+		usage_and_exit(basename);
+	}
+}
+
+static void run_application_file(const char *basename, char **args, int n)
+{
+	pthread_t thread;
+
+	if (strcmp(args[0], "server") == 0) {
+		if (n != 2)
+			usage_and_exit(basename);
+
+		//strcpy(filename, "server-output.dat");
+		u16 port = htons(atoi(args[1]));
+		pthread_create(&thread, NULL, tcp_server_file, &port);
+	}
+	else if (strcmp(args[0], "client") == 0) {
+		if (n != 3)
+			usage_and_exit(basename);
+
+		//strcpy(filename, "client-input.dat");
+		struct sock_addr skaddr;
+		skaddr.ip = inet_addr(args[1]);
+		skaddr.port = htons(atoi(args[2]));
 		pthread_create(&thread, NULL, tcp_client_file, &skaddr);
 	}
 	else {
@@ -116,8 +141,6 @@ static void run_application(const char *basename, char **args, int n)
 
 int main(int argc, char **argv)
 {
-	setbuf(stdout,NULL);
-
 	if (getuid() && geteuid()) {
 		fprintf(stderr, "Permission denied, should be superuser!\n");
 		exit(1);
@@ -136,9 +159,11 @@ int main(int argc, char **argv)
 
 	init_tcp_stack();
 
-	run_application((const char *)basename(argv[0]), argv+1, argc-1);
+	//run_application((const char *)basename(argv[0]), argv+1, argc-1);
+	run_application_file((const char *)basename(argv[0]), argv+1, argc-1);
 
 	ustack_run();
 
 	return 0;
 }
+

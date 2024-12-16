@@ -52,12 +52,12 @@ struct tcp_cb {
 	u32 seq;		// sequence number in tcp header
 	u32 seq_end;		// seq + (SYN|FIN) + len(payload)
 	u32 ack;		// ack number in tcp header
+	char *payload;		// pointer to tcp data
+	int pl_len;		// the length of tcp data
 	u32 rwnd;		// receiving window in tcp header
 	u8 flags;		// flags in tcp header
 	struct iphdr *ip;		// pointer to ip header
 	struct tcphdr *tcp;		// pointer to tcp header
-	char *payload;		// pointer to tcp data
-	int pl_len;		// the length of tcp data
 };
 
 // tcp states
@@ -85,6 +85,12 @@ static inline u16 tcp_checksum(struct iphdr *ip, struct tcphdr *tcp)
 	tcp->checksum = tmp;
 
 	return cksum;
+}
+
+static inline u32 tcp_seq_end(struct iphdr *ip, struct tcphdr *tcp)
+{
+	int len = ntohs(ip->tot_len) - IP_HDR_SIZE(ip) - TCP_HDR_SIZE(tcp);
+	return ntohl(tcp->seq) + len + ((tcp->flags & (TCP_SYN|TCP_FIN)) ? 1 : 0);
 }
 
 extern const char *tcp_state_str[];

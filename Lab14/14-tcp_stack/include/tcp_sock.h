@@ -169,10 +169,10 @@ void tcp_sock_close(struct tcp_sock *tsk);
 int tcp_sock_read(struct tcp_sock *tsk, char *buf, int len);
 int tcp_sock_write(struct tcp_sock *tsk, char *buf, int len);
 
-void tcp_send_buf_add_packet(struct tcp_sock *tsk, char *packet, int len);
-void tcp_update_send_buf(struct tcp_sock *tsk, u32 ack);
-int tcp_retrans_send_buf(struct tcp_sock *tsk);
-int tcp_recv_ofo_buf_add_packet(struct tcp_sock *tsk, struct tcp_cb *cb);
-int tcp_move_recv_ofo_buf(struct tcp_sock *tsk);
+void tcp_send_buffer_add_packet(struct tcp_sock *tsk, char *packet, int len);
+void tcp_update_send_buffer(struct tcp_sock *tsk, u32 ack);
+int tcp_retrans_send_buffer(struct tcp_sock *tsk);
+int tcp_recv_ofo_buffer_add_packet(struct tcp_sock *tsk, struct tcp_cb *cb);
+int tcp_move_recv_ofo_buffer(struct tcp_sock *tsk);
 
 #endif
