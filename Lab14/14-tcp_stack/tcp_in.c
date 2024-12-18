@@ -7,13 +7,19 @@
 
 #include <stdlib.h>
 #include <time.h>
+
+#ifdef LOG_AS_PPT
+struct timeval start;
+#endif
+
 // update the snd_wnd of tcp_sock
 //
 // if the snd_wnd before updating is zero, notify tcp_sock_send (wait_send)
 static inline void tcp_update_window(struct tcp_sock *tsk, struct tcp_cb *cb)
 {
 	u16 old_snd_wnd = tsk->snd_wnd;
-	tsk->snd_wnd = cb->rwnd;
+	tsk->adv_wnd = cb->rwnd;
+	tsk->snd_wnd = min(tsk->adv_wnd, tsk->cwnd*TCP_MSS);
 	if (old_snd_wnd == 0)
 		wake_up(tsk->wait_send);
 
@@ -87,6 +93,80 @@ int handle_tcp_recv_data(struct tcp_sock *tsk, struct tcp_cb * cb) {
 	return 1;
 }
 
+void tcp_congestion_control(struct tcp_sock *tsk, struct tcp_cb *cb, char *packet)
+{
+	int ack_valid = tcp_update_send_buffer(tsk, cb->ack);
+
+	switch (tsk->c_state) {
+		case OPEN: 
+			if (tsk->cwnd < tsk->ssthresh)
+				tsk->cwnd += 1;
+			else
+				tsk->cwnd += 1.0 / tsk->cwnd;
+			if (!ack_valid) {
+				tsk->dupacks++;
+				tsk->c_state = DISORDER;
+			}
+			break;
+
+		case DISORDER:
+			if (tsk->cwnd < tsk->ssthresh)
+				tsk->cwnd += 1;
+			else
+				tsk->cwnd += 1.0 / tsk->cwnd;
+			if (!ack_valid) {
+				tsk->dupacks++;
+				if (tsk->dupacks >= 3) {
+					tsk->ssthresh = max((u32)(tsk->cwnd / 2), 1);
+					tsk->cwnd -= 0.5;
+					tsk->cwnd_flag = 0;
+					tsk->recovery_point = RECOVERY;
+					tcp_retrans_send_buffer(tsk);
+				}
+			}
+			break;
+
+		case LOSS:
+			if (tsk->cwnd < tsk->ssthresh)
+				tsk->cwnd += 1;
+			else
+				tsk->cwnd += 1.0 / tsk->cwnd;
+			if (ack_valid) {
+				if (cb->ack >= tsk->loss_point) {
+					tsk->c_state = OPEN;
+					tsk->dupacks = 0;
+				}
+			}
+			else
+				tsk->dupacks++;
+			break;
+
+		case RECOVERY:
+			if (tsk->cwnd > tsk->ssthresh && tsk->cwnd_flag == 0)
+				tsk->cwnd -= 0.5;
+			else
+				tsk->cwnd_flag = 1;
+			if (ack_valid) {
+				if (cb->ack < tsk->recovery_point) 
+					tcp_retrans_send_buffer(tsk);
+				else {
+					tsk->c_state = OPEN;
+					tsk->dupacks = 0;
+				}
+			}
+			else {
+				tsk->dupacks++;
+				wake_up(tsk->wait_send);
+			}
+			break;
+
+		default:
+			break;
+	}
+
+	tcp_update_retrans_timer(tsk);
+}
+
 // Process the incoming packet according to TCP state machine. 
 void tcp_process(struct tcp_sock *tsk, struct tcp_cb *cb, char *packet)
 {
@@ -143,6 +223,13 @@ void tcp_process(struct tcp_sock *tsk, struct tcp_cb *cb, char *packet)
 				tcp_set_state(tsk, TCP_ESTABLISHED);
 
 				tcp_send_control_packet(tsk, TCP_ACK);
+
+				#ifdef LOG_AS_PPT
+					gettimeofday(&start, NULL);
+				#else
+					pthread_t cwnd_record;
+					pthread_create(&cwnd_record, NULL, tcp_cwnd_thread, (void *)tsk);
+				#endif
 				
 				wake_up(tsk->wait_connect);
 
@@ -232,8 +319,7 @@ void tcp_process(struct tcp_sock *tsk, struct tcp_cb *cb, char *packet)
 					}
 					tsk->snd_una = cb->ack;
 					tcp_update_window_safe(tsk, cb);
-					tcp_update_send_buffer(tsk, cb->ack);
-					tcp_update_retrans_timer(tsk);
+					tcp_congestion_control(tsk, cb, packet);
 				}
 			}
 			break;

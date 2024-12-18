@@ -42,6 +42,7 @@ struct tcphdr {
 #define TCP_HDR_SIZE(tcp) (tcp->off * 4)
 
 #define TCP_DEFAULT_WINDOW 65535
+#define TCP_MSS (1514 - ETHER_HDR_SIZE - IP_BASE_HDR_SIZE - TCP_BASE_HDR_SIZE)
 
 // control block, representing all the necesary information of a packet
 struct tcp_cb {
@@ -64,6 +65,9 @@ struct tcp_cb {
 enum tcp_state { TCP_CLOSED, TCP_LISTEN, TCP_SYN_RECV, TCP_SYN_SENT, \
 	TCP_ESTABLISHED, TCP_CLOSE_WAIT, TCP_LAST_ACK, TCP_FIN_WAIT_1, \
 	TCP_FIN_WAIT_2, TCP_CLOSING, TCP_TIME_WAIT };
+
+// tcp new reno states
+enum tcp_c_state { OPEN, DISORDER, LOSS, RECOVERY, CWR};
 
 static inline struct tcphdr *packet_to_tcp_hdr(char *packet)
 {
@@ -102,5 +106,7 @@ static inline const char *tcp_state_to_str(int state)
 void tcp_copy_flags_to_str(u8 flags, char buf[]);
 void tcp_cb_init(struct iphdr *ip, struct tcphdr *tcp, struct tcp_cb *cb);
 void handle_tcp_packet(char *packet, struct iphdr *ip, struct tcphdr *tcp);
+
+void *tcp_cwnd_thread(void *arg);
 
 #endif

@@ -17,6 +17,10 @@ struct tcp_hash_table tcp_sock_table;
 #define tcp_listen_sock_table		tcp_sock_table.listen_table
 #define tcp_bind_sock_table			tcp_sock_table.bind_table
 
+#ifndef max
+#define max(x,y) ((x)>(y) ? (x) : (y))
+#endif
+
 inline void tcp_set_state(struct tcp_sock *tsk, int state)
 {
 	log(DEBUG, IP_FMT":%hu switch state, from %s to %s.", 
@@ -445,6 +449,12 @@ int tcp_sock_write(struct tcp_sock *tsk, char *buf, int len) {
 		memcpy(packet + ETHER_HDR_SIZE + IP_BASE_HDR_SIZE + TCP_BASE_HDR_SIZE, buf + handled_len, send_len);
 		tcp_send_packet(tsk, packet, packet_len);
 
+		int inflight = (tsk->snd_nxt - tsk->snd_una) - tsk->dupacks*TCP_MSS;
+		if (max(tsk->snd_wnd-inflight, 0) <= 0) {
+			log(DEBUG, "snd_wnd is %d, inflight is %d", tsk->snd_wnd, inflight);
+			sleep_on(tsk->wait_send);
+		}
+
 		tsk->snd_wnd -= send_len;
 		remain_len -= send_len;
 		handled_len += send_len;
@@ -468,8 +478,10 @@ void tcp_send_buffer_add_packet(struct tcp_sock *tsk, char *packet, int len) {
 }
 
 //Update the TCP send buffer based on the acknowledgment number
-void tcp_update_send_buffer(struct tcp_sock *tsk, u32 ack) {
+int tcp_update_send_buffer(struct tcp_sock *tsk, u32 ack) {
+	int ret = 0;
     send_buffer_entry_t *send_buffer_entry, *send_buffer_entry_q;
+	pthread_mutex_lock(&tsk->send_buf_lock);
 
     list_for_each_entry_safe(send_buffer_entry, send_buffer_entry_q, &tsk->send_buf, list) {
         struct tcphdr *tcp = packet_to_tcp_hdr(send_buffer_entry->packet);
@@ -480,8 +492,12 @@ void tcp_update_send_buffer(struct tcp_sock *tsk, u32 ack) {
             list_delete_entry(&send_buffer_entry->list);
             free(send_buffer_entry->packet);
             free(send_buffer_entry);
+			ret = 1;
         }
     }
+
+	pthread_mutex_unlock(&tsk->send_buf_lock);
+	return ret;
 }
 
 // Retransmit the first packet in the TCP send buffer when ack time exceed

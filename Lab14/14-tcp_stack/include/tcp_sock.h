@@ -87,6 +87,9 @@ struct tcp_sock {
 	// tcp state, see enum tcp_state in tcp.h
 	int state;
 
+	// tcp new reno state, see enum tcp_c_state in tcp.h
+	int c_state;
+
 	// initial sending sequence number
 	u32 iss;
 
@@ -110,7 +113,14 @@ struct tcp_sock {
 	u16 rcv_wnd;
 
 	// congestion window
-	u32 cwnd;
+	double cwnd;
+
+	u32 loss_point;
+
+	u32 dupacks;
+
+	// 1: cwnd grow 0: cwnd reduce
+	int cwnd_flag;
 
 	// slow start threshold
 	u32 ssthresh;
@@ -170,9 +180,10 @@ int tcp_sock_read(struct tcp_sock *tsk, char *buf, int len);
 int tcp_sock_write(struct tcp_sock *tsk, char *buf, int len);
 
 void tcp_send_buffer_add_packet(struct tcp_sock *tsk, char *packet, int len);
-void tcp_update_send_buffer(struct tcp_sock *tsk, u32 ack);
+int tcp_update_send_buffer(struct tcp_sock *tsk, u32 ack);
 int tcp_retrans_send_buffer(struct tcp_sock *tsk);
 int tcp_recv_ofo_buffer_add_packet(struct tcp_sock *tsk, struct tcp_cb *cb);
 int tcp_move_recv_ofo_buffer(struct tcp_sock *tsk);
+void cwnd_record(struct tcp_sock *tsk);
 
 #endif

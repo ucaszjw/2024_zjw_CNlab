@@ -6,6 +6,9 @@
 #include <unistd.h>
 #include <sys/time.h>
 
+#ifdef LOG_AS_PPT
+extern struct timeval start;
+#endif
 //char filename[100];
 
 // return the interval in us
@@ -225,5 +228,32 @@ void *tcp_client_file(void *arg)
 	fclose(f);
 	tcp_sock_close(tsk);
 
+	return NULL;
+}
+
+void cwnd_record(struct tcp_sock *tsk) {
+#ifdef LOG_AS_PPT
+	struct timeval current;
+	gettimeofday(&current, NULL);
+	long duration = 1000000 * (current.tv_sec - start.tv_sec) + current.tv_usec - start.tv_usec;
+	char line[100];
+	sprintf(line, "%ld %f %f\n", duration, tsk->cwnd, tsk->cwnd*TCP_MSS);
+	fwrite(line, 1, strlen(line), "cwnd.txt");
+#else
+	return;
+#endif
+}
+
+void *tcp_cwnd_thread(void *arg) {
+	struct tcp_sock *tsk = (struct tcp_sock *)arg;
+	FILE *fp = fopen("cwnd.txt", "w");
+
+	int time_us = 0;
+	while (tsk->state == TCP_ESTABLISHED && time_us < 1000000) {
+		usleep(500);
+		time_us += 500;
+		fprintf(fp, "%d %f %f\n", time_us, tsk->cwnd, tsk->cwnd*TCP_MSS);
+	}
+	fclose(fp);
 	return NULL;
 }

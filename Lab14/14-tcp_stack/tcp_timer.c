@@ -16,6 +16,11 @@ struct list_head retrans_timer_list;
 static pthread_mutex_t timer_list_lock = PTHREAD_MUTEX_INITIALIZER;
 static pthread_mutex_t retrans_timer_list_lock = PTHREAD_MUTEX_INITIALIZER;
 
+#ifndef max
+#define max(x,y) ((x)>(y) ? (x) : (y))
+#endif
+
+
 // scan the timer_list, find the tcp sock which stays for at 2*MSL, release it
 void tcp_scan_timer_list()
 {
@@ -149,8 +154,13 @@ void tcp_scan_retrans_timer_list(void)
 			else if (tsk->state != TCP_CLOSED) {
 				time_entry->retrans_time += 1;
 				log(DEBUG, "retrans time: %d\n", time_entry->retrans_time);
+
+				tsk->ssthresh = max((u32)(tsk->cwnd / 2), 1);
+				tsk->cwnd = 1;
+				tsk->c_state = LOSS;
+				tsk->loss_point = tsk->snd_nxt;
+				cwnd_record(tsk);
 				
-				//time_entry->timeout = TCP_RETRANS_INTERVAL_INITIAL * (1 << time_entry->retrans_time);
 				time_entry->timeout = TCP_RETRANS_INTERVAL_INITIAL;
 				tcp_retrans_send_buffer(tsk);
 			}
