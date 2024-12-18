@@ -911,6 +911,307 @@
 
 \subsection{拥塞控制}
 
+\begin{enumerate}
+    \item \tbf{发送队列控制与拥塞状态机}
+    
+    由于拥塞窗口的控制由 ACK 包触发，在收到新 ACK 包时，扫描发送队列，将已回复的数据包删除：
+
+    \begin{lstlisting}[language=C]
+        //Update the TCP send buffer based on the acknowledgment number
+        int tcp_update_send_buffer(struct tcp_sock *tsk, u32 ack) {
+            int ret = 0;
+            send_buffer_entry_t *send_buffer_entry, *send_buffer_entry_q;
+            pthread_mutex_lock(&tsk->send_buf_lock);
+        
+            list_for_each_entry_safe(send_buffer_entry, send_buffer_entry_q, &tsk->send_buf, list) {
+                struct tcphdr *tcp = packet_to_tcp_hdr(send_buffer_entry->packet);
+                u32 seq = ntohl(tcp->seq);
+        
+                // If the sequence number is less than the acknowledgment number, delete the entry
+                if (less_than_32b(seq, ack)) {
+                    list_delete_entry(&send_buffer_entry->list);
+                    free(send_buffer_entry->packet);
+                    free(send_buffer_entry);
+                    ret = 1;
+                }
+            }
+        
+            pthread_mutex_unlock(&tsk->send_buf_lock);
+            return ret;
+        }
+    \end{lstlisting}
+
+    根据不同的拥塞状态，分别处理收到的 ACK 包。在 \texttt{OPEN} 状态下，直接检查拥塞窗口是否小于慢启动阈值，若小于则通过固定步长增加拥塞窗口，否则通过拥塞避免算法增加拥塞窗口。如果是无效 ACK 包，则将状态切换到 \texttt{DISORDER} ，且增加\texttt{dupacks}计数。
+
+    在 \texttt{DISORDER} 状态下，拥塞窗口与上面类似，但是增加了对\texttt{dupacks}计数的处理，若\texttt{dupacks}计数达到阈值，则判定丢包，启动快重传，且不用等待定时器超时，将状态切换到 \texttt{RECOVERY}，启动快恢复。
+
+    在 \texttt{RECOVERY} 状态下，拥塞窗口值变为原来的一半。当对方确认所有进入 \texttt{RECOVERY} 状态前发送的数据包时，将状态切换到 \texttt{OPEN}，否则重传。再若 \texttt{RECOVERY} 状态下收到无效 ACK 包，则 \texttt{dupacks} 计数加一，唤醒发送数据进程。
+
+    \texttt{LOSS} 状态仅能通过定时器超时触发，进入时阈值减半，拥塞窗口值变为1，重新慢启动。当接收方确认所有进入 \texttt{LOSS} 状态前发送的数据包时，将状态切换到 \texttt{OPEN}。若收到无效 ACK 包，则增加\texttt{dupacks}计数。
+
+    最后更新超时重传定时器。以上过程代码如下：
+
+    \begin{lstlisting}[language=C]
+        void tcp_congestion_control(struct tcp_sock *tsk, struct tcp_cb *cb, char *packet)
+        {
+            int ack_valid = tcp_update_send_buffer(tsk, cb->ack);
+        
+            switch (tsk->c_state) {
+                case OPEN: 
+                    if (tsk->cwnd < tsk->ssthresh)
+                        tsk->cwnd += 1;
+                    else
+                        tsk->cwnd += 1.0 / tsk->cwnd;
+                    if (!ack_valid) {
+                        tsk->dupacks++;
+                        tsk->c_state = DISORDER;
+                    }
+                    break;
+        
+                case DISORDER:
+                    if (tsk->cwnd < tsk->ssthresh)
+                        tsk->cwnd += 1;
+                    else
+                        tsk->cwnd += 1.0 / tsk->cwnd;
+                    if (!ack_valid) {
+                        tsk->dupacks++;
+                        if (tsk->dupacks >= 3) {
+                            tsk->ssthresh = max((u32)(tsk->cwnd / 2), 1);
+                            tsk->cwnd -= 0.5;
+                            tsk->cwnd_flag = 0;
+                            tsk->recovery_point = RECOVERY;
+                            tcp_retrans_send_buffer(tsk);
+                        }
+                    }
+                    break;
+        
+                case LOSS:
+                    if (tsk->cwnd < tsk->ssthresh)
+                        tsk->cwnd += 1;
+                    else
+                        tsk->cwnd += 1.0 / tsk->cwnd;
+                    if (ack_valid) {
+                        if (cb->ack >= tsk->loss_point) {
+                            tsk->c_state = OPEN;
+                            tsk->dupacks = 0;
+                        }
+                    }
+                    else
+                        tsk->dupacks++;
+                    break;
+        
+                case RECOVERY:
+                    if (tsk->cwnd > tsk->ssthresh && tsk->cwnd_flag == 0)
+                        tsk->cwnd -= 0.5;
+                    else
+                        tsk->cwnd_flag = 1;
+                    if (ack_valid) {
+                        if (cb->ack < tsk->recovery_point) 
+                            tcp_retrans_send_buffer(tsk);
+                        else {
+                            tsk->c_state = OPEN;
+                            tsk->dupacks = 0;
+                        }
+                    }
+                    else {
+                        tsk->dupacks++;
+                        wake_up(tsk->wait_send);
+                    }
+                    break;
+        
+                default:
+                    break;
+            }
+        
+            tcp_update_retrans_timer(tsk);
+        }
+    \end{lstlisting}
+    
+    \item \tbf{拥塞控制实现}
+    
+    这一部分是对之前一些函数的修改。
+
+    原有的窗口更新未考虑拥塞窗口，现在需要将拥塞窗口和接收窗口中的最小值作为发送窗口大小：
+
+    \begin{lstlisting}[language=C]
+        // update the snd_wnd of tcp_sock
+        //
+        // if the snd_wnd before updating is zero, notify tcp_sock_send (wait_send)
+        static inline void tcp_update_window(struct tcp_sock *tsk, struct tcp_cb *cb)
+        {
+            u16 old_snd_wnd = tsk->snd_wnd;
+            tsk->adv_wnd = cb->rwnd;
+            tsk->snd_wnd = min(tsk->adv_wnd, tsk->cwnd*TCP_MSS);
+            if (old_snd_wnd == 0)
+                wake_up(tsk->wait_send);
+        }
+    \end{lstlisting}
+    
+    数据包发送时，需要检测在途数据包和发送窗口大小，若发送窗口不足则等待：
+
+    \begin{lstlisting}[language=C]
+        int tcp_sock_write(struct tcp_sock *tsk, char *buf, int len) {
+            int send_len, packet_len;
+            int remain_len = len;
+            int handled_len = 0;
+        
+            while (!list_empty(&tsk->send_buf))
+                sleep_on(tsk->wait_send);
+        
+            while (remain_len) {
+                send_len = min(remain_len, 1514 - ETHER_HDR_SIZE - IP_BASE_HDR_SIZE - TCP_BASE_HDR_SIZE);
+                if (tsk->snd_wnd < send_len)
+                    sleep_on(tsk->wait_send);
+        
+                packet_len = send_len + ETHER_HDR_SIZE + IP_BASE_HDR_SIZE + TCP_BASE_HDR_SIZE;
+                char *packet = (char *)malloc(packet_len);
+                memcpy(packet + ETHER_HDR_SIZE + IP_BASE_HDR_SIZE + TCP_BASE_HDR_SIZE, buf + handled_len, send_len);
+                tcp_send_packet(tsk, packet, packet_len);
+        
+                int inflight = (tsk->snd_nxt - tsk->snd_una) - tsk->dupacks*TCP_MSS;
+                if (max(tsk->snd_wnd-inflight, 0) <= 0) {
+                    log(DEBUG, "snd_wnd is %d, inflight is %d", tsk->snd_wnd, inflight);
+                    sleep_on(tsk->wait_send);
+                }
+        
+                tsk->snd_wnd -= send_len;
+                remain_len -= send_len;
+                handled_len += send_len;
+            }
+        
+            return handled_len;
+        }
+    \end{lstlisting}
+    
+    超时重发也需要考虑拥塞窗口，超时重发时，拥塞状态变为 \texttt{LOSS}，\texttt{ssthresh} 减半，拥塞窗口变为1，重新慢启动：
+
+    \begin{lstlisting}[language=C]
+        void tcp_scan_retrans_timer_list(void)
+        {
+            struct tcp_sock *tsk;
+            struct tcp_timer *time_entry, *time_q;
+        
+            pthread_mutex_lock(&retrans_timer_list_lock);
+            
+            list_for_each_entry_safe(time_entry, time_q, &retrans_timer_list, list) {
+                time_entry->timeout -= TCP_RETRANS_SCAN_INTERVAL;
+                tsk = retranstimer_to_tcp_sock(time_entry);
+                if (time_entry->timeout <= 0) {
+                    if(time_entry->retrans_time >= MAX_RETRANS_NUM && tsk->state != TCP_CLOSED){
+                        list_delete_entry(&time_entry->list);
+                        if (!tsk->parent)
+                            tcp_unhash(tsk);
+                            
+                        wait_exit(tsk->wait_connect);
+                        wait_exit(tsk->wait_accept);
+                        wait_exit(tsk->wait_recv);
+                        wait_exit(tsk->wait_send);
+                        
+                        tcp_set_state(tsk, TCP_CLOSED);
+                        tcp_send_control_packet(tsk, TCP_RST);
+                    }
+                    else if (tsk->state != TCP_CLOSED) {
+                        time_entry->retrans_time += 1;
+                        log(DEBUG, "retrans time: %d\n", time_entry->retrans_time);
+        
+                        tsk->ssthresh = max((u32)(tsk->cwnd / 2), 1);
+                        tsk->cwnd = 1;
+                        tsk->c_state = LOSS;
+                        tsk->loss_point = tsk->snd_nxt;
+                        cwnd_record(tsk);
+                        
+                        time_entry->timeout = TCP_RETRANS_INTERVAL_INITIAL;
+                        tcp_retrans_send_buffer(tsk);
+                    }
+                }
+            }
+        
+            pthread_mutex_unlock(&retrans_timer_list_lock);
+        }
+    \end{lstlisting}
+    
+    最后，在 TCP 连接的 \texttt{ESTABLISHED} 状态下，使用 \texttt{tcp\_congestion\_control} 函数处理拥塞控制：
+
+    \begin{lstlisting}[language=C]
+        case TCP_ESTABLISHED: 
+            if (less_than_32b(cb->seq, tsk->rcv_nxt)) {
+                tcp_send_control_packet(tsk, TCP_ACK);
+                return;
+            }
+
+            if (!is_tcp_seq_valid(tsk, cb))
+                return;
+
+            if (cb->flags & TCP_ACK) {
+                tcp_update_window_safe(tsk, cb);
+                tsk->snd_una = greater_than_32b(cb->ack, tsk->snd_una) ? cb->ack : tsk->snd_una;;
+            }
+
+            if (cb->flags & TCP_FIN) {
+                tcp_update_send_buffer(tsk, cb->ack);
+                tcp_update_retrans_timer(tsk);
+                if (tsk->retrans_timer.enable)
+                    log(ERROR, "still have no ack packet before close wait\n");
+
+                tcp_set_state(tsk, TCP_CLOSE_WAIT);
+                handle_tcp_recv_data(tsk, cb);
+
+                tsk->rcv_nxt = cb->seq_end;
+                tcp_send_control_packet(tsk, TCP_ACK);
+                
+                wake_up(tsk->wait_recv);
+            } 
+            else {
+                if (cb->pl_len != 0)
+                    handle_tcp_recv_data(tsk, cb);
+                else{
+                    tsk->rcv_nxt = cb->seq_end;
+                    if (cb->ack > tsk->snd_una) {
+                        tsk->retrans_timer.retrans_time = 0;
+                        tsk->retrans_timer.timeout = TCP_RETRANS_INTERVAL_INITIAL;
+                    }
+                    tsk->snd_una = cb->ack;
+                    tcp_update_window_safe(tsk, cb);
+                    tcp_congestion_control(tsk, cb, packet);
+                }
+            }
+            break;
+    \end{lstlisting}
+
+    \item \tbf{拥塞窗口统计}
+    
+    为了更加准确的记录拥塞窗口的变化，首先在拥塞窗口值变化时记录下来，写入文件。此外，我也创建了一个线程，每隔一段时间读取拥塞窗口值，写入文件：
+
+    \begin{lstlisting}[language=C]
+        void cwnd_record(struct tcp_sock *tsk) {
+            #ifdef LOG_AS_PPT
+                struct timeval current;
+                gettimeofday(&current, NULL);
+                long duration = 1000000 * (current.tv_sec - start.tv_sec) + current.tv_usec - start.tv_usec;
+                char line[100];
+                sprintf(line, "%ld %f %f\n", duration, tsk->cwnd, tsk->cwnd*TCP_MSS);
+                fwrite(line, 1, strlen(line), "cwnd.txt");
+            #else
+                return;
+            #endif
+            }
+            
+            void *tcp_cwnd_thread(void *arg) {
+                struct tcp_sock *tsk = (struct tcp_sock *)arg;
+                FILE *fp = fopen("cwnd.txt", "w");
+            
+                int time_us = 0;
+                while (tsk->state == TCP_ESTABLISHED && time_us < 1000000) {
+                    usleep(500);
+                    time_us += 500;
+                    fprintf(fp, "%d %f %f\n", time_us, tsk->cwnd, tsk->cwnd*TCP_MSS);
+                }
+                fclose(fp);
+                return NULL;
+            }
+    \end{lstlisting}
+\end{enumerate}
+
 \section{实验结果}
 
 \subsection{丢包恢复}
@@ -985,9 +1286,18 @@
 
 \subsection{拥塞控制}
 
+拥塞窗口随时间的变化图如下：
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\textwidth]{cwnd_plot.png}
+    \caption{拥塞窗口随时间的变化}
+\end{figure}
+
+可以看出，拥塞窗口的变化符合慢启动、拥塞避免、快恢复、快重传的规律。若拥塞窗口下降再迅速恢复，说明这是一次快重传快恢复的过程。若拥塞窗口下降到最低点再缓慢增长，说明这是一次超时重传的过程。
+
 \section{实验总结}
 
 本次实验中，我们实现了丢包恢复和拥塞控制的功能。通过实验，我们再次深入了解了 TCP 协议栈的工作原理。实现可靠传输使得数据传输更加稳定，实现拥塞控制使得网络更加稳定。通过本次实验，我们对 TCP 协议栈的实现有了更深入的了解，更加接近真实的 TCP 协议栈。
-
 
 \end{document}
